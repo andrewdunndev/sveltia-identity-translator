@@ -1,0 +1,63 @@
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The translated identity flow. Editor signs in via Google Workspace, the translator handles five distinct jobs (OAuth, JWT mint, REST proxy, GraphQL passthrough, synthesized identity), then forwards to GitLab API as a single bot account that commits with the editor as author and the bot as committer." style="width:100%;max-width:720px;margin:1.5rem 0;display:block;font-family:var(--font-ui, 'Source Sans Pro', sans-serif)">
+  <defs>
+    <marker id="r-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,3.5 L0,7 z" fill="var(--text-muted, #909090)" />
+    </marker>
+  </defs>
+
+  <text x="80" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text-2, #404040)">EDITOR</text>
+  <text x="350" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent, #4a6741)">TRANSLATOR (Worker)</text>
+  <text x="640" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text-2, #404040)">GIT HOST</text>
+
+  <rect x="20" y="40" width="120" height="60" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="80" y="62" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Sveltia /admin/</text>
+  <text x="80" y="78" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">Workspace account</text>
+  <text x="80" y="92" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">no git-host account</text>
+
+  <rect x="220" y="40" width="260" height="280" rx="4" fill="none" stroke="var(--accent, #4a6741)" stroke-width="2" />
+
+  <rect x="240" y="60" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="250" y="76" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">1</text>
+  <text x="262" y="76" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">/oauth/authorize + /callback</text>
+  <text x="262" y="91" font-size="9" fill="var(--text-2, #404040)">verify hd claim, mint 24h JWT</text>
+
+  <rect x="240" y="110" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="250" y="126" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">2</text>
+  <text x="262" y="126" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">JWT mint (HS256)</text>
+  <text x="262" y="141" font-size="9" fill="var(--text-2, #404040)">sub, email, name; 24h expiry</text>
+
+  <rect x="240" y="160" width="220" height="50" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="250" y="176" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">3</text>
+  <text x="262" y="176" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">/gitlab/* REST proxy</text>
+  <text x="262" y="191" font-size="9" fill="var(--text-2, #404040)">JWT verify → allowlist → swap</text>
+  <text x="262" y="203" font-size="9" fill="var(--text-2, #404040)">to PAT → inject author_*</text>
+
+  <rect x="240" y="220" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="250" y="236" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">4</text>
+  <text x="262" y="236" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">/gitlab/graphql</text>
+  <text x="262" y="251" font-size="9" fill="var(--text-2, #404040)">read-only; mutations → 403</text>
+
+  <rect x="240" y="270" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="250" y="286" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">5</text>
+  <text x="262" y="286" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">synthesized identity</text>
+  <text x="262" y="301" font-size="9" fill="var(--text-2, #404040)">/user, /members/all/0 from JWT</text>
+
+  <rect x="560" y="40" width="140" height="80" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="630" y="62" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Google consent</text>
+  <text x="630" y="78" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">OAuth 2.0 + OIDC</text>
+  <text x="630" y="92" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">hd: example.org</text>
+
+  <rect x="560" y="200" width="140" height="100" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="630" y="222" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">GitLab api/v4</text>
+  <text x="630" y="240" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">single bot PAT</text>
+  <text x="630" y="258" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">commit:</text>
+  <text x="630" y="272" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">author = editor</text>
+  <text x="630" y="285" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">committer = bot</text>
+
+  <line x1="142" y1="70" x2="218" y2="80" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#r-arrow)" />
+  <line x1="482" y1="80" x2="558" y2="80" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#r-arrow)" />
+  <line x1="558" y1="100" x2="482" y2="100" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#r-arrow)" />
+
+  <line x1="142" y1="80" x2="218" y2="180" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#r-arrow)" />
+  <line x1="482" y1="190" x2="558" y2="240" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#r-arrow)" />
+</svg>

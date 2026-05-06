@@ -1,0 +1,84 @@
+<svg viewBox="0 0 1200 430" xmlns="http://www.w3.org/2000/svg" font-family="'IBM Plex Mono', 'Courier New', monospace">
+  <rect x="0" y="0" width="1200" height="430" fill="#faf6ed" stroke="#2c2417" stroke-width="3"/>
+  <rect x="0" y="0" width="1200" height="36" fill="#2c2417"/>
+  <text x="16" y="24" font-size="14" fill="#faf6ed" font-weight="bold">sveltia-identity-translator</text>
+  <text x="1184" y="24" font-size="11" fill="#c4b99a" text-anchor="end">translated-identity proxy for Sveltia CMS</text>
+
+  <defs>
+    <marker id="h-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,3.5 L0,7 z" fill="#2c2417"/>
+    </marker>
+    <marker id="h-arrow-light" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,3.5 L0,7 z" fill="#6b5d4f"/>
+    </marker>
+  </defs>
+
+  <text x="120" y="68" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c2417">EDITOR (Workspace)</text>
+  <text x="600" y="68" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c2417">TRANSLATOR (Cloudflare Worker)</text>
+  <text x="1080" y="68" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c2417">GIT HOST</text>
+
+  <rect x="40" y="90" width="160" height="60" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="120" y="115" text-anchor="middle" font-size="11" fill="#2c2417">teacher@example.org</text>
+  <text x="120" y="132" text-anchor="middle" font-size="9" fill="#6b5d4f">no git-host account</text>
+
+  <rect x="40" y="170" width="160" height="60" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="120" y="195" text-anchor="middle" font-size="11" fill="#2c2417">Sveltia /admin/</text>
+  <text x="120" y="212" text-anchor="middle" font-size="9" fill="#6b5d4f">save / read collections</text>
+
+  <rect x="40" y="250" width="160" height="60" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="120" y="275" text-anchor="middle" font-size="11" fill="#2c2417">Google OIDC</text>
+  <text x="120" y="292" text-anchor="middle" font-size="9" fill="#6b5d4f">hd claim verifies domain</text>
+
+  <rect x="320" y="80" width="560" height="240" fill="none" stroke="#2c2417" stroke-width="2"/>
+
+  <rect x="340" y="100" width="240" height="42" fill="none" stroke="#6b5d4f" stroke-width="1"/>
+  <text x="350" y="118" font-size="10" font-weight="bold" fill="#2c2417">1. /oauth/authorize + /callback</text>
+  <text x="350" y="132" font-size="9" fill="#6b5d4f">verify hd claim, server-side</text>
+
+  <rect x="340" y="150" width="240" height="42" fill="none" stroke="#6b5d4f" stroke-width="1"/>
+  <text x="350" y="168" font-size="10" font-weight="bold" fill="#2c2417">2. mint 24h JWT (HS256)</text>
+  <text x="350" y="182" font-size="9" fill="#6b5d4f">sub, email, name</text>
+
+  <rect x="340" y="200" width="240" height="42" fill="none" stroke="#6b5d4f" stroke-width="1"/>
+  <text x="350" y="218" font-size="10" font-weight="bold" fill="#2c2417">3. /gitlab/* REST proxy</text>
+  <text x="350" y="232" font-size="9" fill="#6b5d4f">JWT verify, allowlist, swap, inject</text>
+
+  <rect x="340" y="250" width="240" height="42" fill="none" stroke="#6b5d4f" stroke-width="1"/>
+  <text x="350" y="268" font-size="10" font-weight="bold" fill="#2c2417">4. /gitlab/graphql</text>
+  <text x="350" y="282" font-size="9" fill="#6b5d4f">read-only; mutations rejected</text>
+
+  <rect x="600" y="100" width="260" height="200" fill="none" stroke="#6b5d4f" stroke-width="1"/>
+  <text x="610" y="118" font-size="10" font-weight="bold" fill="#2c2417">editors.yml (in git)</text>
+  <text x="610" y="138" font-size="9" fill="#6b5d4f">teacher@example.org:</text>
+  <text x="620" y="152" font-size="9" fill="#6b5d4f">your-org/site:</text>
+  <text x="630" y="166" font-size="9" fill="#6b5d4f">- src/content/blog/**</text>
+  <text x="610" y="190" font-size="9" fill="#6b5d4f">admin@example.org:</text>
+  <text x="620" y="204" font-size="9" fill="#6b5d4f">your-org/site:</text>
+  <text x="630" y="218" font-size="9" fill="#6b5d4f">- "**"</text>
+  <line x1="610" y1="240" x2="850" y2="240" stroke="#c4b99a" stroke-width="1"/>
+  <text x="610" y="258" font-size="9" font-weight="bold" fill="#2c2417">authorize hook</text>
+  <text x="610" y="272" font-size="9" fill="#6b5d4f">(identity, repo, path) -&gt; bool</text>
+  <text x="610" y="286" font-size="9" fill="#6b5d4f">default-deny</text>
+
+  <rect x="1000" y="90" width="160" height="60" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="1080" y="115" text-anchor="middle" font-size="11" fill="#2c2417">single bot PAT</text>
+  <text x="1080" y="132" text-anchor="middle" font-size="9" fill="#6b5d4f">one credential, all editors</text>
+
+  <rect x="1000" y="170" width="160" height="80" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="1080" y="192" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c2417">commit</text>
+  <text x="1080" y="210" text-anchor="middle" font-size="9" fill="#2c2417">author = editor</text>
+  <text x="1080" y="224" text-anchor="middle" font-size="9" fill="#2c2417">committer = bot</text>
+  <text x="1080" y="240" text-anchor="middle" font-size="9" fill="#6b5d4f">attribution preserved</text>
+
+  <rect x="1000" y="270" width="160" height="40" fill="none" stroke="#2c2417" stroke-width="1.5"/>
+  <text x="1080" y="295" text-anchor="middle" font-size="11" fill="#2c2417">git repository</text>
+
+  <line x1="200" y1="200" x2="318" y2="200" stroke="#2c2417" stroke-width="1.5" marker-end="url(#h-arrow)"/>
+  <line x1="200" y1="280" x2="318" y2="240" stroke="#6b5d4f" stroke-width="1.2" marker-end="url(#h-arrow-light)"/>
+  <line x1="882" y1="200" x2="998" y2="200" stroke="#2c2417" stroke-width="1.5" marker-end="url(#h-arrow)"/>
+
+  <line x1="40" y1="340" x2="1160" y2="340" stroke="#c4b99a" stroke-width="1"/>
+  <text x="600" y="362" font-size="10" fill="#6b5d4f" text-anchor="middle">editors authenticate against your IdP; one bot does the API calls; commits attribute correctly</text>
+  <text x="600" y="386" font-size="9" font-weight="600" fill="#2c2417" text-anchor="middle">~700 LOC TypeScript -- Cloudflare Workers free tier -- MIT licensed</text>
+  <text x="600" y="410" font-size="9" fill="#6b5d4f" text-anchor="middle">github.com/andrewdunndev/sveltia-identity-translator</text>
+</svg>

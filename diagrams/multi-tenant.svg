@@ -1,0 +1,41 @@
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One translator Worker fronts multiple consumer sites. Site A and Site B each have their own Sveltia frontend pointing at the same translator hostname; the translator routes both to the same single bot at GitLab, with editors.yml controlling per-(identity, repo, path) write access for both sites." style="width:100%;max-width:720px;margin:1.5rem 0;display:block;font-family:var(--font-ui, 'Source Sans Pro', sans-serif)">
+  <defs>
+    <marker id="mt-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,3.5 L0,7 z" fill="var(--text-muted, #909090)" />
+    </marker>
+  </defs>
+
+  <rect x="20" y="40" width="160" height="50" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="100" y="60" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Site A /admin/</text>
+  <text x="100" y="76" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">your-org/main-site</text>
+
+  <rect x="20" y="115" width="160" height="50" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="100" y="135" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Site B /admin/</text>
+  <text x="100" y="151" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">your-org/docs</text>
+
+  <rect x="20" y="190" width="160" height="50" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
+  <text x="100" y="210" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Site C /admin/</text>
+  <text x="100" y="226" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">your-org/docs-private</text>
+
+  <rect x="280" y="60" width="180" height="160" rx="4" fill="none" stroke="var(--accent, #4a6741)" stroke-width="2" />
+  <text x="370" y="85" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent, #4a6741)">translator</text>
+  <text x="370" y="103" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">one Worker</text>
+  <text x="370" y="116" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">one OAuth client</text>
+  <text x="370" y="129" text-anchor="middle" font-size="9" fill="var(--text-2, #404040)">one JWT secret</text>
+
+  <rect x="295" y="145" width="150" height="60" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
+  <text x="370" y="161" text-anchor="middle" font-size="9" font-weight="700" fill="var(--text-muted, #909090)">editors.yml</text>
+  <text x="305" y="178" font-size="8" fill="var(--text-2, #404040)" font-family="monospace">a@org: { main: [**] }</text>
+  <text x="305" y="190" font-size="8" fill="var(--text-2, #404040)" font-family="monospace">b@org: { docs: [**] }</text>
+  <text x="305" y="201" font-size="8" fill="var(--text-2, #404040)" font-family="monospace">c@org: { private: [..] }</text>
+
+  <rect x="560" y="115" width="140" height="50" rx="3" fill="none" stroke="var(--callout-warning, #c4763a)" stroke-width="1.5" />
+  <text x="630" y="135" text-anchor="middle" font-size="10" font-weight="600" fill="var(--callout-warning, #c4763a)">single bot PAT</text>
+  <text x="630" y="151" text-anchor="middle" font-size="9" fill="var(--text-muted, #909090)">all three sites</text>
+
+  <line x1="182" y1="65" x2="278" y2="100" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#mt-arrow)" />
+  <line x1="182" y1="140" x2="278" y2="140" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#mt-arrow)" />
+  <line x1="182" y1="215" x2="278" y2="180" stroke="var(--text-muted, #909090)" stroke-width="1.2" marker-end="url(#mt-arrow)" />
+
+  <line x1="462" y1="140" x2="558" y2="140" stroke="var(--accent, #4a6741)" stroke-width="1.5" marker-end="url(#mt-arrow)" />
+</svg>

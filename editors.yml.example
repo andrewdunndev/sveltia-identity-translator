@@ -1,0 +1,54 @@
+# editors.yml -- per-(identity, repo, path) allowlist
+#
+# Loaded by the GitLab proxy to enforce write boundaries. Default is
+# deny-everything: an identity with no entry here cannot write to any
+# repo through the translator, regardless of what the JWT or the
+# service-account PAT could otherwise reach.
+#
+# Schema:
+#   <oauth-email>:
+#     <gitlab-org/repo>:
+#       - <path-glob>      # standard glob, ** for recursive
+#
+# The proxy matches the request's URL-decoded `file_path` against the
+# globs for the identity's entry under the relevant repo. First match
+# wins. No match -> 403.
+#
+# Adding a new editor:
+#   1. Add their OAuth email as a top-level key.
+#   2. List the repos they can write to.
+#   3. List the paths within each repo. Be specific; avoid ["**"]
+#      unless the identity is genuinely repo-owner.
+#
+# Adding a new site:
+#   1. Add the GitLab repo path as a key under each editor who should
+#      have write access.
+#   2. Default to no access for everyone else.
+#
+# Rotating an editor out:
+#   Remove the top-level key. Active sessions die when the JWT expires
+#   (24h). Force-revoke by rotating JWT_SECRET via wrangler secret put.
+
+# ----- Examples -----
+
+# Repo owner with full write access to two sites.
+admin@example.org:
+  your-org/your-site:
+    - "**"
+  your-org/your-other-site:
+    - "**"
+
+# Editor scoped to blog posts only on one site.
+editor@example.org:
+  your-org/your-site:
+    - "src/content/blog/**"
+
+# Smoke-test fixture identity. Used by scripts/smoke.mjs to verify the
+# negative path (a write outside the allowlist returns 403). Has read
+# access to your-site (so reads are tested too) and write access only
+# under src/content/blog/. JWTs for this identity are minted locally
+# by the smoke script using JWT_SECRET; this entry alone does not
+# grant any access without a valid JWT.
+smoke_editor@example.org:
+  your-org/your-site:
+    - "src/content/blog/**"

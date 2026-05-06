@@ -1,0 +1,35 @@
+{
+  "name": "sveltia-identity-translator",
+  "version": "0.1.0",
+  "description": "Translated-identity proxy for Sveltia CMS: editors authenticate against your existing IdP (Google Workspace, etc) while a single service-account PAT does the GitLab API calls. Editors save changes without ever touching git.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Andrew Dunn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andrewdunndev/sveltia-identity-translator.git"
+  },
+  "keywords": [
+    "sveltia",
+    "cms",
+    "auth",
+    "oauth",
+    "cloudflare-workers",
+    "gitlab",
+    "translated-identity"
+  ],
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250505.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}

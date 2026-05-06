@@ -1,0 +1,38 @@
+# sveltia-identity-translator -- Cloudflare Worker config
+#
+# Copy this file to `wrangler.toml` and fill in the values for your
+# deployment. Don't commit wrangler.toml to a public repo: account_id
+# is your Cloudflare account identifier and routes leak your hostnames.
+#
+# Sensitive values (OAUTH_CLIENT_SECRET, JWT_SECRET, GITLAB_API_TOKEN)
+# are NOT set here -- they go through `wrangler secret put` and live
+# in Cloudflare's secret storage. See README.md for the full setup.
+
+name = "sveltia-identity-translator"
+main = "src/index.ts"
+compatibility_date = "2026-05-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Bundle .yml files as text so editors.yml can be `import`-ed by
+# src/authorize.ts and parsed at module init.
+rules = [
+  { type = "Text", globs = ["**/*.yml"], fallthrough = true },
+]
+
+# Surface logs via `wrangler tail` and the Cloudflare dashboard.
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
+# Public, non-sensitive defaults.
+[vars]
+# The Workspace primary domain editors must belong to. Verified
+# against the OIDC `hd` claim on every sign-in. Required.
+ALLOWED_DOMAIN = "example.org"
+
+# Bind the Worker to a custom hostname under one of your zones.
+# Without this, the Worker is reachable at <name>.<account>.workers.dev.
+# Adjust pattern + zone_name to match your setup.
+# [[routes]]
+# pattern = "translator.example.org/*"
+# zone_name = "example.org"
