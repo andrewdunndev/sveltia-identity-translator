@@ -1,7 +1,7 @@
 # Cloudflare: deploy the Worker
 
 The translator runs as a single [Cloudflare Worker][cf-workers] on
-the free plan. No queues, no R2, no KV, no D1 — just the Worker
+the free plan. No queues, no R2, no KV, no D1, just the Worker
 itself.
 
 [cf-workers]: https://developers.cloudflare.com/workers/
@@ -22,12 +22,12 @@ What you'll do:
 - A Cloudflare account. The Workers free plan is sufficient until you
   pass 100k requests/day.
 - The four values from the GitLab and Google setup steps:
-  - `GITLAB_API_TOKEN` — from
+  - `GITLAB_API_TOKEN`, from
     [docs/gitlab-pat-setup.md](./gitlab-pat-setup.md)
-  - `OAUTH_CLIENT_ID` — from
+  - `OAUTH_CLIENT_ID`, from
     [docs/google-oauth-setup.md](./google-oauth-setup.md)
-  - `OAUTH_CLIENT_SECRET` — same
-  - `JWT_SECRET` — generate locally:
+  - `OAUTH_CLIENT_SECRET`, same
+  - `JWT_SECRET`, generate locally:
 
     ```bash
     openssl rand -hex 32
@@ -76,7 +76,7 @@ nobody can write anything. See `editors.yml.example` for the full
 schema.
 
 This file is gitignored by default. You almost certainly want to
-commit *your* `editors.yml` to *your* fork — versioning it gives
+commit *your* `editors.yml` to *your* fork, versioning it gives
 blame, review, and rollback for changes to who can edit what. To
 commit it, remove the line from `.gitignore`.
 
@@ -89,7 +89,7 @@ npx wrangler deploy
 The first run prompts you to log in to Cloudflare (browser-based).
 Subsequent runs use stored credentials.
 
-After deploy, wrangler prints the Worker's URL — something like
+After deploy, wrangler prints the Worker's URL, something like
 `https://sveltia-identity-translator.<your-account>.workers.dev`.
 This is the value you'll use as `<worker-hostname>` everywhere.
 
@@ -106,7 +106,7 @@ Each command prompts for the value; paste it and hit enter. The
 value is stored encrypted in Cloudflare's secret backend; wrangler
 won't print or echo it.
 
-After setting all four, redeploy is **not** required — secrets are
+After setting all four, redeploy is **not** required, secrets are
 live immediately.
 
 ### 6. Verify
@@ -126,9 +126,9 @@ JWT_SECRET=<the value you set> node scripts/smoke.mjs \
   --editor smoke_editor@example.org
 ```
 
-You should see `pass=18 blocked=0 fail=0` (or similar — counts can
+You should see `pass=18 blocked=0 fail=0` (or similar, counts can
 shift as the suite grows). `blocked` cases are environment problems
-the translator can't fix (branch protection, expired PAT) — see the
+the translator can't fix (branch protection, expired PAT), see the
 output for resolution hints.
 
 ### 7. Custom hostname (optional)

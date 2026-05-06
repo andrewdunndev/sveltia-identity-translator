@@ -16,8 +16,8 @@ identity needs author injection, which only works via REST `POST
 silently break editor attribution.
 
 The translator fails closed on any request body containing the
-`mutation` keyword (HTTP 403). The regex is intentionally permissive
-— a false positive on a string literal containing the word "mutation"
+`mutation` keyword (HTTP 403). The regex is intentionally permissive.
+A false positive on a string literal containing the word "mutation"
 inside a query is acceptable; the failure mode is "use REST for
 writes," which is what Sveltia already does.
 
@@ -29,7 +29,7 @@ constraint loosens. Until then, fail-closed is the honest model.
 Once at the authorize URL (Google's `hd` parameter), once at the
 userinfo response (the `hd` claim). They are not the same check.
 
-The `hd=<domain>` URL parameter is a UI hint — it scopes Google's
+The `hd=<domain>` URL parameter is a UI hint. It scopes Google's
 account chooser to accounts in the named domain. A user who has both
 a personal `@gmail.com` account and a `@example.org` account can
 still pick the personal one if they want. The hint shapes
@@ -83,7 +83,7 @@ auditor-driven session-length requirements, etc.).
 
 JWTs are signed HS256 with a server-side secret (`JWT_SECRET`). The
 symmetric algorithm is appropriate here because there's exactly one
-issuer and one verifier — the same Worker — so the public-key
+issuer and one verifier, the same Worker, so the public-key
 distribution problem that motivates RS256 doesn't exist. Force-revoke
 all sessions by rotating `JWT_SECRET` (`wrangler secret put
 JWT_SECRET`).
@@ -130,7 +130,7 @@ harness should stay because it's fast and contract-shaped.
 ## Why CORS is currently `*`
 
 `access-control-allow-origin: *` is permissive. The translator
-doesn't enforce origin-based access — it enforces JWT-based access,
+doesn't enforce origin-based access; it enforces JWT-based access,
 and the JWT only ever reaches the Sveltia origin via the
 `postMessage`'s `targetOrigin` (which is set to the
 `state.origin` from the authorize step, derived from `site_id`).
@@ -145,7 +145,7 @@ a thin extra layer at low cost; do it.
 ## What's deliberately not implemented
 
 - **Per-collection visibility in Sveltia.** Sveltia's `config.yml`
-  is global — every signed-in editor sees every collection. The
+  is global: every signed-in editor sees every collection. The
   actual access boundary is the translator's allowlist; an editor
   who clicks into a collection they can't write gets a 403 on save.
   That's a confusing UI, but the cleanest fix ("multiple admin

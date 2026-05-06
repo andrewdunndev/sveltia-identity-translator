@@ -70,7 +70,7 @@ to absorb this codebase as a "translated-identity mode" with the
 `IdPConfig` and `Authorizer` exposed as deployer-supplied hooks.
 
 If you're contributing here and your change is mechanically
-relevant upstream, mention it in the PR — it informs how we shape
+relevant upstream, mention it in the PR, it informs how we shape
 the eventual upstream contribution.
 
 [upstream]: https://github.com/sveltia/sveltia-cms-auth

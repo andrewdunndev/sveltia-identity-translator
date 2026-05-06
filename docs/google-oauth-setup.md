@@ -71,7 +71,7 @@ enabled on the project. (You don't need any other API.)
    Add both. You can add or remove URIs later without recreating the
    client.
 7. Click "Create."
-8. **Copy the Client ID and Client Secret immediately** — Google
+8. **Copy the Client ID and Client Secret immediately**, Google
    shows them once in a modal. Store them in a password manager.
 
 These values become the Cloudflare Worker secrets `OAUTH_CLIENT_ID`

@@ -6,7 +6,7 @@ remaining step is to point your site's Sveltia at it.
 This doc assumes you already have Sveltia working with the standard
 `sveltia-cms-auth` proxy. If not, get that working first against your
 existing GitLab account, then swap in the translator. That ordering
-makes troubleshooting much easier — if Sveltia doesn't load with a
+makes troubleshooting much easier, if Sveltia doesn't load with a
 direct GitLab token, the translator won't help.
 
 ## The config
@@ -26,22 +26,22 @@ backend:
 
 Field-by-field:
 
-- **`name: gitlab`** — keep the GitLab backend. The translator looks
+- **`name: gitlab`**, keep the GitLab backend. The translator looks
   like GitLab to Sveltia; we're not switching backends, just
   redirecting traffic through the proxy.
-- **`repo`** — the GitLab project Sveltia will read and write.
+- **`repo`**, the GitLab project Sveltia will read and write.
   Format `<group>/<project>`. Must have an entry under at least one
   identity in `editors.yml`.
-- **`branch`** — usually `main`. Whatever your default is.
-- **`api_root: https://<worker-hostname>/gitlab`** — this is what
+- **`branch`**, usually `main`. Whatever your default is.
+- **`api_root: https://<worker-hostname>/gitlab`**, this is what
   changes. Sveltia's REST and GraphQL calls go through the
   translator instead of directly to `gitlab.com/api/v4`.
-- **`auth_endpoint: oauth/authorize`** — Sveltia treats this as a
+- **`auth_endpoint: oauth/authorize`**, Sveltia treats this as a
   path under `base_url`. The popup will open
   `https://<worker-hostname>/oauth/authorize?...`.
-- **`base_url: https://<worker-hostname>`** — root of the auth
+- **`base_url: https://<worker-hostname>`**, root of the auth
   popup URL.
-- **`proxied: true`** — tells Sveltia we're running behind a proxy
+- **`proxied: true`**, tells Sveltia we're running behind a proxy
   rather than talking to GitLab directly. Without this, Sveltia
   applies a few client-side optimizations (e.g. constructing some
   URLs against `gitlab.com` directly) that bypass the translator.
@@ -54,7 +54,7 @@ Field-by-field:
 3. The popup should redirect through the Google consent screen and
    close itself.
 4. The Sveltia UI should populate with your repo's collections.
-5. Make a test edit — change a single character in a draft post.
+5. Make a test edit, change a single character in a draft post.
 6. Click Save.
 7. Pull the repo and run `git log -1 --format='%an %ae / %cn %ce'`.
    The first half should be your editor identity; the second half
@@ -77,7 +77,7 @@ Field-by-field:
   branches. The bot needs Maintainer-or-equivalent push permission
   on the branch.
 - **Image upload fails with "graphql mutation not permitted."**
-  This shouldn't happen — Sveltia uses REST for uploads. If it
+  This shouldn't happen, Sveltia uses REST for uploads. If it
   does, you're on a Sveltia version that's regressed; check
   upstream issues. The translator deliberately fails closed on
   GraphQL mutations (see ARCHITECTURE.md).
@@ -102,7 +102,7 @@ constrained by `editors.yml` to the repos they're listed under.
 
 ## Per-collection visibility
 
-Sveltia's `config.yml` is global — every signed-in editor sees every
+Sveltia's `config.yml` is global, every signed-in editor sees every
 collection. This is a Sveltia limitation, not a translator one.
 
 If your editor count is small (1-3 people, say), the translator's

@@ -39,7 +39,7 @@ settings. PATs work everywhere.
    - **Role:** Maintainer.
    - **Scopes:** `api`.
 4. Click "Create access token." Copy the token value
-   *immediately* — GitLab won't show it again.
+   *immediately*, GitLab won't show it again.
 5. Save the token in a password manager.
 
 You'll feed this value into `wrangler secret put GITLAB_API_TOKEN`
@@ -70,7 +70,7 @@ will mark these as `blocked` rather than `fail`.
 
 If you set up branch protection that requires MR review for every
 change (a defensible choice for higher-stakes content), the
-translator still works — but Sveltia will need to be configured to
+translator still works, but Sveltia will need to be configured to
 open MRs rather than commit directly. That's a Sveltia-config matter,
 not a translator-config matter.
 
@@ -89,7 +89,7 @@ not a translator-config matter.
   change (the editor identity verified by Google).
 - **Scope minimization.** The translator only uses `api` scope.
   Don't grant `read_repository`, `write_repository`, or admin
-  scopes — they aren't needed and broaden the blast radius if the
+  scopes, they aren't needed and broaden the blast radius if the
   token leaks.
 - **Never put the token in a CI variable that prints to logs.**
   Cloudflare Worker secrets are write-only after `wrangler secret

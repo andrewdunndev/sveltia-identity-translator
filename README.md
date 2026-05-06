@@ -35,7 +35,7 @@ You're a small org (school, nonprofit, club, side project) that:
   lock-in).
 - Wants legible code that the next volunteer can maintain.
 
-If your editors already have GitLab accounts, you don't need this — use
+If your editors already have GitLab accounts, you don't need this. Use
 the standard [`sveltia-cms-auth`][sveltia-auth] proxy. This translator is
 specifically for the case where the editor identity and the git-host
 identity are not the same person.
@@ -56,7 +56,7 @@ The translator does five jobs:
    server-side check enforces.
 
 2. **JWT mint.** A 24-hour [HS256][jwt-hs256] token signed with a server
-   secret. Carries `sub`, `email`, `name` — enough for everything
+   secret. Carries `sub`, `email`, `name`, enough for everything
    downstream.
 
 3. **REST proxy.** Every API call from Sveltia goes through `/gitlab/*`.
@@ -66,7 +66,7 @@ The translator does five jobs:
    request body so the editor's identity survives onto the commit.
 
 4. **GraphQL passthrough, read-only.** Sveltia uses GraphQL for all
-   reads (file tree, blobs, default branch) and REST for writes — the
+   reads (file tree, blobs, default branch) and REST for writes. The
    upstream comment in `commits.js` explains: *"the commitCreate
    GraphQL mutation is broken and images cannot be uploaded properly,
    so we use the REST API instead."* The translator forwards GraphQL
@@ -74,7 +74,7 @@ The translator does five jobs:
    containing a `mutation` keyword (HTTP 403).
 
 5. **Synthesized identity endpoints.** Two GitLab API endpoints aren't
-   forwarded — they're answered from the JWT. `GET /user` returns the
+   forwarded; the translator answers them from the JWT directly. `GET /user` returns the
    editor's identity (the PAT's userinfo would be the bot, which is
    wrong). `GET /projects/<repo>/members/all/0` returns a fake
    Maintainer membership (Sveltia checks repo access by user-id after
@@ -86,7 +86,7 @@ The translator does five jobs:
 [jwt-hs256]: https://en.wikipedia.org/wiki/JSON_Web_Token
 [fail-closed]: https://en.wikipedia.org/wiki/Fail-safe#Fail-secure
 
-Authorization is a pluggable hook — `authorize(identity, repo, method,
+Authorization is a pluggable hook: `authorize(identity, repo, method,
 path) → bool`. The default impl is a YAML allowlist (`editors.yml`)
 checked into the repo with per-(email, repo, path-glob) tuples;
 default-deny. The hook shape is what matters; the YAML is one
@@ -113,13 +113,13 @@ are `wrangler deploy`.
 
 The four steps below have full detail in `docs/`:
 
-1. **GitLab service account + PAT** — see
+1. **GitLab service account + PAT**, see
    [docs/gitlab-pat-setup.md](./docs/gitlab-pat-setup.md).
-2. **Google OAuth client** — see
+2. **Google OAuth client**, see
    [docs/google-oauth-setup.md](./docs/google-oauth-setup.md).
-3. **Cloudflare Worker deploy** — see
+3. **Cloudflare Worker deploy**, see
    [docs/cloudflare-deploy.md](./docs/cloudflare-deploy.md).
-4. **Sveltia config wiring** — see
+4. **Sveltia config wiring**, see
    [docs/sveltia-config.md](./docs/sveltia-config.md).
 
 Below is the condensed walkthrough. If anything feels unclear, the
@@ -215,7 +215,7 @@ backend:
 Open `https://your-site.example.org/admin/`. Sveltia should redirect
 you through the Google consent screen and back. After sign-in,
 collections from your repo should populate. Make a test edit, click
-Save, and check `git log` — the commit should be authored by your
+Save, and check `git log`, the commit should be authored by your
 email, committer should be the bot.
 
 If anything fails, see the per-step docs for the most common gotchas
@@ -292,7 +292,7 @@ The harness covers OAuth redirect, JWT validation, REST routing,
 GraphQL routing + mutation rejection, allowlist enforcement (read +
 write, positive + negative), CORS preflight, synthesized identity
 endpoints, author injection, and PAT-expiry early warning. The actual
-Google round-trip is exercised separately in a browser — headless
+Google round-trip is exercised separately in a browser, headless
 OAuth is brittle and the gain over local-mint coverage is small.
 
 A pass run looks like:
@@ -307,7 +307,7 @@ pass=18  blocked=0  fail=0
 ```
 
 `blocked` cases are environment problems the translator can't fix
-(branch protection refusing the bot, expired PAT) — the proxy is
+(branch protection refusing the bot, expired PAT), the proxy is
 working; resolve outside the proxy.
 
 ## Architecture
@@ -335,13 +335,13 @@ repo is the staging ground for that contribution.
 
 ## Prior art
 
-- [`sveltia/sveltia-cms-auth`][sveltia-auth] — Sveltia's standard
+- [`sveltia/sveltia-cms-auth`][sveltia-auth], Sveltia's standard
   OAuth proxy. Implements the strict 1:1 model (editor's own GitLab
   token is what reaches the CMS). No translation hook. This
   translator is what you'd write if you wanted that hook.
-- [`vencax/netlify-cms-github-oauth-provider`][vencax] — Decap's
+- [`vencax/netlify-cms-github-oauth-provider`][vencax], Decap's
   community OAuth provider, same shape, same limitation.
-- [`decaporg/decap-cms`][decap] — the CMS this pattern would also
+- [`decaporg/decap-cms`][decap], the CMS this pattern would also
   apply to. The Decap version of this translator is plausible but
   unimplemented; if you build it, send a PR.
 
