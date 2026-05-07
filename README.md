@@ -354,4 +354,4 @@ repo is the staging ground for that contribution.
 
 ---
 
-Built by [Andrew Dunn](https://andrew.dunn.dev) for the school he volunteers at, distilled into a generic pattern other small orgs can deploy. The companion writeup is at [andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing](https://andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing/).
+Built by [Andrew Dunn](https://andrew.dunn.dev), with collaboration from [Andrew DeJong](https://dejong.engineering/) ([@adejong5](https://github.com/adejong5)), for the school he volunteers at. Distilled into a generic pattern other small orgs can deploy. The companion writeup is at [andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing](https://andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing/).
