@@ -1208,3 +1208,28 @@ describe("buildAuthorizer", () => {
     }
   });
 });
+
+describe("cors", () => {
+  const send = (path, origin) =>
+    worker.fetch(
+      new Request(`https://translator.test${path}`, {
+        method: path.endsWith("graphql") ? "POST" : "GET",
+        headers: origin ? { origin } : {},
+        body: path.endsWith("graphql") ? "{}" : undefined,
+      }),
+      env,
+    );
+
+  for (const path of ["/gitlab/user", "/gitlab/graphql"]) {
+    test(`${path} echoes an allowed origin and no other`, async () => {
+      const ok = await send(path, "https://example.com");
+      assert.equal(ok.headers.get("access-control-allow-origin"), "https://example.com");
+      assert.match(ok.headers.get("vary"), /Origin/);
+      for (const o of ["https://evil.example", "http://example.com", null]) {
+        const r = await send(path, o);
+        assert.equal(r.headers.get("access-control-allow-origin"), null, String(o));
+        assert.match(r.headers.get("vary"), /Origin/);
+      }
+    });
+  }
+});
