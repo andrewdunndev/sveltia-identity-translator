@@ -20,12 +20,12 @@
   <rect x="240" y="60" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
   <text x="250" y="76" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">1</text>
   <text x="262" y="76" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">/oauth/authorize + /callback</text>
-  <text x="262" y="91" font-size="9" fill="var(--text-2, #404040)">verify hd claim, mint 24h JWT</text>
+  <text x="262" y="91" font-size="9" fill="var(--text-2, #404040)">verify hd claim, mint 8h JWT</text>
 
   <rect x="240" y="110" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
   <text x="250" y="126" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">2</text>
   <text x="262" y="126" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">JWT mint (HS256)</text>
-  <text x="262" y="141" font-size="9" fill="var(--text-2, #404040)">sub, email, name; 24h expiry</text>
+  <text x="262" y="141" font-size="9" fill="var(--text-2, #404040)">sub, email, name; 8h expiry</text>
 
   <rect x="240" y="160" width="220" height="50" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
   <text x="250" y="176" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">3</text>
@@ -36,12 +36,12 @@
   <rect x="240" y="220" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
   <text x="250" y="236" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">4</text>
   <text x="262" y="236" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">/gitlab/graphql</text>
-  <text x="262" y="251" font-size="9" fill="var(--text-2, #404040)">read-only; mutations → 403</text>
+  <text x="262" y="251" font-size="9" fill="var(--text-2, #404040)">parsed; read queries only</text>
 
   <rect x="240" y="270" width="220" height="40" rx="2" fill="none" stroke="var(--border, #e0e0e0)" stroke-width="1" />
   <text x="250" y="286" font-size="9" font-weight="700" fill="var(--accent, #4a6741)">5</text>
   <text x="262" y="286" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">synthesized identity</text>
-  <text x="262" y="301" font-size="9" fill="var(--text-2, #404040)">/user, /members/all/0 from JWT</text>
+  <text x="262" y="301" font-size="9" fill="var(--text-2, #404040)">/user, /users, /members from JWT</text>
 
   <rect x="560" y="40" width="140" height="80" rx="3" fill="none" stroke="var(--text, #0a0a0a)" stroke-width="1.5" />
   <text x="630" y="62" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text, #0a0a0a)">Google consent</text>

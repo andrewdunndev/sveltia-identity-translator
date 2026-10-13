@@ -1,17 +1,14 @@
 # Sveltia: wiring `admin/config.yml`
 
-Once the Worker is deployed and the secrets are set, the only
-remaining step is to point your site's Sveltia at it.
+With the Worker deployed and its secrets set, point the site's Sveltia
+at it. If Sveltia doesn't already work on this site against GitLab
+directly (through `sveltia-cms-auth` and your own account), get that
+working first; the proxy can't fix a site that doesn't load.
 
-This doc assumes you already have Sveltia working with the standard
-`sveltia-cms-auth` proxy. If not, get that working first against your
-existing GitLab account, then swap in the translator. That ordering
-makes troubleshooting much easier, if Sveltia doesn't load with a
-direct GitLab token, the translator won't help.
+The proxy answers the access probe Sveltia has sent since 0.179, so
+earlier releases are not supported.
 
 ## The config
-
-In your site's `admin/config.yml`:
 
 ```yaml
 backend:
@@ -24,109 +21,71 @@ backend:
   proxied: true
 ```
 
-Field-by-field:
+- **`name: gitlab`.** The proxy looks like GitLab to Sveltia.
+- **`repo`.** The project Sveltia reads and writes, as
+  `<group>/<project>`. It needs a `repos:` entry in `editors.yml` and
+  an entry under each editor who should reach it.
+- **`branch`.** Must equal the repo's `branch` in `editors.yml`; a
+  commit to any other branch is refused.
+- **`api_root`.** Sveltia's REST and GraphQL calls go through the
+  proxy instead of `gitlab.com`.
+- **`auth_endpoint` and `base_url`.** The sign-in popup opens
+  `https://<worker-hostname>/oauth/authorize`.
+- **`proxied: true`.** Without it Sveltia builds some URLs against
+  `gitlab.com` directly and bypasses the proxy.
 
-- **`name: gitlab`**, keep the GitLab backend. The translator looks
-  like GitLab to Sveltia; we're not switching backends, just
-  redirecting traffic through the proxy.
-- **`repo`**, the GitLab project Sveltia will read and write.
-  Format `<group>/<project>`. Must have an entry under at least one
-  identity in `editors.yml`.
-- **`branch`**, usually `main`. Whatever your default is.
-- **`api_root: https://<worker-hostname>/gitlab`**, this is what
-  changes. Sveltia's REST and GraphQL calls go through the
-  translator instead of directly to `gitlab.com/api/v4`.
-- **`auth_endpoint: oauth/authorize`**, Sveltia treats this as a
-  path under `base_url`. The popup will open
-  `https://<worker-hostname>/oauth/authorize?...`.
-- **`base_url: https://<worker-hostname>`**, root of the auth
-  popup URL.
-- **`proxied: true`**, tells Sveltia we're running behind a proxy
-  rather than talking to GitLab directly. Without this, Sveltia
-  applies a few client-side optimizations (e.g. constructing some
-  URLs against `gitlab.com` directly) that bypass the translator.
+The hostname serving `/admin/` must be in the Worker's
+`ALLOWED_SITES`.
 
-## Smoke-test the wiring
+## Checking the wiring
 
-1. Open `https://your-site.example.org/admin/`.
-2. Click "Sign in with Google" (Sveltia labels this with whatever
-   the `auth_type` resolves to; it's still going through Google).
-3. The popup should redirect through the Google consent screen and
-   close itself.
-4. The Sveltia UI should populate with your repo's collections.
-5. Make a test edit, change a single character in a draft post.
-6. Click Save.
-7. Pull the repo and run `git log -1 --format='%an %ae / %cn %ce'`.
-   The first half should be your editor identity; the second half
-   should be the bot.
+1. Open `https://your-site.example.org/admin/` and sign in. The popup
+   goes through Google and closes itself.
+2. The collections populate.
+3. Change one character in a draft and save.
+4. `git log -1 --format='%an %ae / %cn %ce'` shows the editor, then
+   the service account.
 
-## Common failure modes
+## Failure modes
 
-- **"Sign in with GitLab" redirects to gitlab.com instead of
-  Google.** `proxied: true` is missing. Add it.
-- **Sveltia loads but collections are empty.** Read access denied
-  by `editors.yml`. Check `wrangler tail` for `translator.deny.read`
-  log lines. The signed-in editor's email must have an entry under
-  the configured repo, even if the entry is just `["**"]`.
-- **Save returns "Forbidden."** Write allowlist denied. Check
-  `wrangler tail` for `translator.deny.write` entries. The editor's
-  globs under the repo don't match the file path being written.
-- **Save returns 500 with "not allowed to push."** GitLab branch
-  protection is refusing the bot. The translator forwarded
-  correctly; resolve in GitLab → Settings → Repository → Protected
-  branches. The bot needs Maintainer-or-equivalent push permission
-  on the branch.
-- **Image upload fails with a GraphQL refusal.** Sveltia uses REST for
-  uploads, so this means a Sveltia version that sends GraphQL writes;
-  the translator refuses everything but its read shapes (see
-  ARCHITECTURE.md).
-- **"Access denied" page after Google sign-in.** The signed-in account
-  isn't in the `ALLOWED_DOMAIN` you set in `wrangler.toml`. Check the
-  email.
+`wrangler tail` shows the proxy's side of each; denials log as
+`translator.deny.<reason>`.
 
-## Multi-site setup
+- **The popup goes to gitlab.com, not Google.** `proxied: true` is
+  missing.
+- **"Unknown site."** The hostname serving `/admin/` is not in
+  `ALLOWED_SITES`.
+- **"Access denied" after Google sign-in.** The account's domain is
+  not `ALLOWED_DOMAIN`.
+- **"This account is not set up as an editor."** The email has no
+  entry in `editors.yml`. Add one and redeploy.
+- **Collections are empty** (`deny.read`). The editor has no entry
+  under this repo.
+- **Save is refused** (`deny.write`). The path is outside the repo's
+  `write_roots`, has an extension the root doesn't allow, or doesn't
+  match the editor's globs.
+- **Save is refused** (`deny.branch`). Sveltia's `branch` differs
+  from the repo's `branch` in `editors.yml`.
+- **Save is refused** (`deny.route` or `deny.graphql_query`). Sveltia
+  made a call the proxy doesn't serve, usually after a Sveltia
+  upgrade. Open an issue with the Sveltia version and the logged
+  path.
+- **Save fails with "not allowed to push".** GitLab branch protection
+  is refusing the service account; it needs Maintainer push on the
+  branch.
 
-The translator is multi-tenant. To add a second site:
+## More than one site
 
-1. Add the second site's repo + path globs to `editors.yml` for each
-   editor who should have access there.
-2. Redeploy the Worker (it bundles `editors.yml` at build time):
-   `npx wrangler deploy`.
-3. In the second site's `admin/config.yml`, point at the same Worker
-   with `repo:` set to the second project.
-
-No new Worker, no new OAuth client, no new secrets. The same JWT
-that signs the first site's editor in works for the second site,
-constrained by `editors.yml` to the repos they're listed under.
+Each further site is its hostname in `ALLOWED_SITES`, a `repos:` entry
+and editor entries in `editors.yml`, a redeploy, and a `config.yml`
+pointing at the same Worker with its own `repo:`. One sign-in covers
+every site the editor is listed under.
 
 ## Per-collection visibility
 
-Sveltia's `config.yml` is global, every signed-in editor sees every
-collection. This is a Sveltia limitation, not a translator one.
-
-If your editor count is small (1-3 people, say), the translator's
-allowlist is sufficient: an editor who clicks into a collection
-they can't write gets a 403 on save. Confusing UI, harmless
-boundary.
-
-If you have many editors with disjoint scopes, the cleanest
-workaround is multiple admin paths:
-
-```
-your-site/
-  admin/
-    teacher/
-      config.yml      # collections teachers should see
-      index.html
-    admin/
-      config.yml      # collections admins should see
-      index.html
-```
-
-Each admin path has its own scoped `config.yml`. Editors get
-URL-restricted UIs; the translator's allowlist remains the actual
-boundary.
-
-This is a Sveltia roadmap candidate ("per-collection `visible_to`
-predicate keyed off identity claims") and not a translator
-problem.
+Sveltia's `config.yml` is global: every editor sees every collection,
+and one they can't write gets a 403 on save. The boundary holds; the
+UI is just wider than it. For editors with disjoint scopes, separate
+admin paths (`/admin/teacher/`, `/admin/office/`), each with its own
+`config.yml`, narrow what each group sees, while `editors.yml` stays
+the thing that decides.

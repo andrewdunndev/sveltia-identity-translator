@@ -29,12 +29,12 @@
   <rect x="260" y="120" width="260" height="42" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="270" y="138" font-size="10" font-weight="700" fill="#4a6741">1</text>
   <text x="284" y="138" font-size="11" font-weight="600" fill="#0a0a0a">/oauth/authorize + /callback</text>
-  <text x="284" y="153" font-size="10" fill="#404040">verify hd claim, mint 24h JWT</text>
+  <text x="284" y="153" font-size="10" fill="#404040">verify hd claim, mint 8h JWT</text>
 
   <rect x="260" y="172" width="260" height="42" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="270" y="190" font-size="10" font-weight="700" fill="#4a6741">2</text>
   <text x="284" y="190" font-size="11" font-weight="600" fill="#0a0a0a">JWT mint (HS256)</text>
-  <text x="284" y="205" font-size="10" fill="#404040">sub, email, name; 24h expiry</text>
+  <text x="284" y="205" font-size="10" fill="#404040">sub, email, name; 8h expiry</text>
 
   <rect x="260" y="224" width="260" height="52" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="270" y="242" font-size="10" font-weight="700" fill="#4a6741">3</text>
@@ -45,12 +45,12 @@
   <rect x="260" y="286" width="260" height="42" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="270" y="304" font-size="10" font-weight="700" fill="#4a6741">4</text>
   <text x="284" y="304" font-size="11" font-weight="600" fill="#0a0a0a">/gitlab/graphql</text>
-  <text x="284" y="319" font-size="10" fill="#404040">read-only; mutations rejected</text>
+  <text x="284" y="319" font-size="10" fill="#404040">parsed; read queries only</text>
 
   <rect x="260" y="338" width="260" height="42" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="270" y="356" font-size="10" font-weight="700" fill="#4a6741">5</text>
   <text x="284" y="356" font-size="11" font-weight="600" fill="#0a0a0a">synthesized identity</text>
-  <text x="284" y="371" font-size="10" fill="#404040">/user, /members/all/0 from JWT</text>
+  <text x="284" y="371" font-size="10" fill="#404040">/user, /users, /members from JWT</text>
 
   <rect x="540" y="120" width="280" height="200" rx="2" fill="none" stroke="#e0e0e0" stroke-width="1"/>
   <text x="552" y="138" font-size="10" font-weight="700" fill="#909090">editors.yml (versioned in git)</text>
@@ -60,7 +60,7 @@
 
   <text x="552" y="212" font-size="10" fill="#404040" font-family="ui-monospace, 'SF Mono', Menlo, monospace">admin@example.org:</text>
   <text x="564" y="226" font-size="10" fill="#404040" font-family="ui-monospace, 'SF Mono', Menlo, monospace">your-org/site:</text>
-  <text x="576" y="240" font-size="10" fill="#404040" font-family="ui-monospace, 'SF Mono', Menlo, monospace">- "**"</text>
+  <text x="576" y="240" font-size="10" fill="#404040" font-family="ui-monospace, 'SF Mono', Menlo, monospace">- src/content/**</text>
 
   <line x1="552" y1="258" x2="808" y2="258" stroke="#e0e0e0" stroke-width="1"/>
 
@@ -93,6 +93,6 @@
   <line x1="842" y1="252" x2="898" y2="290" stroke="#4a6741" stroke-width="1.5" marker-end="url(#h-arrow-accent)"/>
 
   <line x1="20" y1="408" x2="1180" y2="408" stroke="#e0e0e0" stroke-width="1"/>
-  <text x="20" y="423" font-size="10" fill="#909090">~700 LOC TypeScript · Cloudflare Workers free tier · MIT licensed</text>
+  <text x="20" y="423" font-size="10" fill="#909090">TypeScript · Cloudflare Workers free tier · MIT licensed</text>
   <text x="1180" y="423" text-anchor="end" font-size="10" fill="#909090">github.com/andrewdunndev/sveltia-identity-translator</text>
 </svg>
