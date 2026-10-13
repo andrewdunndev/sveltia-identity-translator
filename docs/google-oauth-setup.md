@@ -26,15 +26,7 @@ What you'll create:
 
 [gcp-console]: https://console.cloud.google.com/
 
-### 2. Enable the People API
-
-The userinfo endpoint the translator hits requires the People API
-enabled on the project. (You don't need any other API.)
-
-1. **APIs & Services → Library** (left nav).
-2. Search "People API" → Enable.
-
-### 3. OAuth consent screen
+### 2. OAuth consent screen
 
 1. **APIs & Services → OAuth consent screen** (left nav).
 2. **User type:** Internal if your Workspace edition allows it. This
@@ -56,7 +48,7 @@ enabled on the project. (You don't need any other API.)
    `.../auth/userinfo.profile`. The translator needs both.
 8. Save.
 
-### 4. OAuth 2.0 client
+### 3. OAuth 2.0 client
 
 1. **APIs & Services → Credentials** (left nav).
 2. **Create credentials → OAuth client ID.**
@@ -119,7 +111,7 @@ server-side `hd` claim check in the translator is what enforces.)
 - **OAuth client ID is not a secret.** It's visible to anyone who
   hits your Worker's `/oauth/authorize` (it's in the URL). The
   client *secret* is the only sensitive value.
-- **`hd` claim** is set automatically by Google on userinfo for
+- **`hd` claim** is set automatically by Google in the `id_token` for
   Workspace accounts. Personal `@gmail.com` accounts have no `hd`
   claim, so the translator's check correctly rejects them.
 

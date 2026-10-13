@@ -15,19 +15,19 @@ identity needs author injection, which only works via REST `POST
 `author_email`). Routing GraphQL writes through the translator would
 silently break editor attribution.
 
-The translator fails closed on any request body containing the
-`mutation` keyword (HTTP 403). The regex is intentionally permissive.
-A false positive on a string literal containing the word "mutation"
-inside a query is acceptable; the failure mode is "use REST for
-writes," which is what Sveltia already does.
+The translator parses each GraphQL document and forwards only the fixed
+read shapes Sveltia sends, with only their declared variables and a
+`fullPath` the editor is authorized for. Anything else, mutations
+included, is refused (HTTP 403); writes go through REST, which is what
+Sveltia already does.
 
 If upstream `commitCreate` ever gains an `author` override, this
 constraint loosens. Until then, fail-closed is the honest model.
 
 ## Why `hd` is checked twice
 
-Once at the authorize URL (Google's `hd` parameter), once at the
-userinfo response (the `hd` claim). They are not the same check.
+Once at the authorize URL (Google's `hd` parameter), once on the
+`id_token` (the `hd` and `email_verified` claims). They are not the same check.
 
 The `hd=<domain>` URL parameter is a UI hint. It scopes Google's
 account chooser to accounts in the named domain. A user who has both
@@ -35,14 +35,14 @@ a personal `@gmail.com` account and a `@example.org` account can
 still pick the personal one if they want. The hint shapes
 convenience, not access.
 
-The userinfo response carries `hd` as a cryptographic claim. The
-server-side check on that claim is the actual boundary. A user
-bypassing the URL hint and signing in with their personal account
-will still fail the userinfo check and get a 403.
+The `id_token` carries `hd` as a signed claim. The server-side check on
+that claim is the actual boundary. A user bypassing the URL hint and
+signing in with their personal account will still fail that check and
+get a 403. An empty `ALLOWED_DOMAIN` refuses sign-in.
 
 Removing either check weakens the model. Remove the URL hint and
 editors see their personal accounts in the chooser, which is a UX
-regression. Remove the userinfo check and personal accounts can sign
+regression. Remove the claim check and personal accounts can sign
 in successfully. A future contributor might think `hd=` in the URL
 is the security check; the comments in `src/oauth.ts` and
 `src/idp.ts` are explicit about the difference to head that off.
@@ -54,7 +54,8 @@ is the security check; the comments in `src/oauth.ts` and
 The translator is multi-tenant by construction. A second consumer
 site (a sister blog, a documentation site, anything Sveltia-driven)
 is a Sveltia config drop and one or more entries in `editors.yml`.
-No new Worker, no new domain, no new secrets.
+A new site needs its hostname in `ALLOWED_SITES`, a `repos:` entry and a
+redeploy; no new Worker, domain or secrets.
 
 This matters operationally. An in-repo proxy (one Worker per site)
 is per-site by construction; every new site doubles the auth
@@ -67,11 +68,11 @@ repo separately, and a path-glob entry under one repo doesn't grant
 anything in another. A typo in one entry can't accidentally unlock
 a different site.
 
-## Why JWT is 24h with no refresh
+## Why JWT is 8h with no refresh
 
-24 hours is long enough that an editor's saving session never
-re-authenticates mid-flight. It's short enough that a leaked token
-expires within a working day.
+8 hours covers a working session without re-authenticating mid-flight
+and bounds a leaked token to less than a day. The token carries `iss`
+and `aud` bound to the Worker's origin.
 
 Refresh-token machinery would gain rotation but cost code and a flow
 the translator doesn't need at this scale. Sveltia silently re-auths
@@ -127,20 +128,12 @@ Pragmatism over completeness. A future contributor who needs the
 headless round-trip can add a test using Playwright; the local-mint
 harness should stay because it's fast and contract-shaped.
 
-## Why CORS is currently `*`
+## Why CORS echoes an allowlist
 
-`access-control-allow-origin: *` is permissive. The translator
-doesn't enforce origin-based access; it enforces JWT-based access,
-and the JWT only ever reaches the Sveltia origin via the
-`postMessage`'s `targetOrigin` (which is set to the
-`state.origin` from the authorize step, derived from `site_id`).
-
-Tightening CORS to specific consumer-site origins is straightforward
-once the canonical origins are known. For a multi-tenant deploy
-where new consumer sites might appear without redeploy, leaving
-CORS open and relying on the JWT boundary is operationally simpler.
-For a single-tenant deploy with a fixed origin, narrowing CORS adds
-a thin extra layer at low cost; do it.
+Responses echo `Access-Control-Allow-Origin` only for origins in
+`ALLOWED_SITES` (with `Vary: Origin`); the OAuth callback delivers the
+token only to the origin recorded in the signed `state`, which is also
+bound to a PKCE cookie.
 
 ## What's deliberately not implemented
 
@@ -152,7 +145,7 @@ a thin extra layer at low cost; do it.
   paths," `/admin/teacher/`, `/admin/admin/`, each with its own
   scoped `config.yml`) is deferred until the editor count
   justifies it.
-- **Refresh tokens.** See "Why JWT is 24h with no refresh."
+- **Refresh tokens.** See "Why JWT is 8h with no refresh."
 - **Decap support.** The handlers are mechanically similar but the
   client-side `postMessage` shape differs slightly. If you need it,
   the contribution is small; PRs welcome.

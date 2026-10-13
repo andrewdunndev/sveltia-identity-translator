@@ -51,12 +51,12 @@ The translator does five jobs:
 
 1. **OAuth handshake.** Standard authorization-code flow against your
    IdP. The crucial check is server-side verification of the [`hd`
-   claim][hd-claim] on the userinfo response, not the `hd` URL hint at
+   claim][hd-claim] (and `email_verified`) on the `id_token`, not the `hd` URL hint at
    authorize time. The hint scopes the account chooser; only the
    server-side check enforces.
 
-2. **JWT mint.** A 24-hour [HS256][jwt-hs256] token signed with a server
-   secret. Carries `sub`, `email`, `name`, enough for everything
+2. **JWT mint.** An 8-hour [HS256][jwt-hs256] token signed with a server
+   secret, bound to the Worker's origin. Carries `sub`, `email`, `name`, enough for everything
    downstream.
 
 3. **REST proxy.** Every API call from Sveltia goes through `/gitlab/*`.
@@ -69,9 +69,9 @@ The translator does five jobs:
    reads (file tree, blobs, default branch) and REST for writes. The
    upstream comment in `commits.js` explains: *"the commitCreate
    GraphQL mutation is broken and images cannot be uploaded properly,
-   so we use the REST API instead."* The translator forwards GraphQL
-   queries verbatim and [fails closed][fail-closed] on any body
-   containing a `mutation` keyword (HTTP 403).
+   so we use the REST API instead."* The translator parses each
+   document, forwards only those read shapes, and [fails closed][fail-closed]
+   on anything else (HTTP 403).
 
 5. **Synthesized identity endpoints.** Two GitLab API endpoints aren't
    forwarded; the translator answers them from the JWT directly. `GET /user` returns the
@@ -331,9 +331,9 @@ The non-obvious design decisions are written up in
 [ARCHITECTURE.md](./ARCHITECTURE.md). Highlights:
 
 - Why GraphQL is read-only and not just rate-limited.
-- Why `hd` is checked twice (the URL hint vs the userinfo claim).
+- Why `hd` is checked twice (the URL hint vs the `id_token` claim).
 - Why one Worker can serve multiple sites.
-- Why JWT is 24h with no refresh token.
+- Why JWT is 8h with no refresh token.
 - Why `editors.yml` lives in the relay's repo.
 - Why the smoke harness mints JWTs locally.
 

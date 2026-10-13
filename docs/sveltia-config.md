@@ -76,14 +76,13 @@ Field-by-field:
   correctly; resolve in GitLab → Settings → Repository → Protected
   branches. The bot needs Maintainer-or-equivalent push permission
   on the branch.
-- **Image upload fails with "graphql mutation not permitted."**
-  This shouldn't happen, Sveltia uses REST for uploads. If it
-  does, you're on a Sveltia version that's regressed; check
-  upstream issues. The translator deliberately fails closed on
-  GraphQL mutations (see ARCHITECTURE.md).
-- **"hd claim mismatch" error page after Google sign-in.** The
-  signed-in account isn't in the `ALLOWED_DOMAIN` you set in
-  `wrangler.toml`. Check the email.
+- **Image upload fails with a GraphQL refusal.** Sveltia uses REST for
+  uploads, so this means a Sveltia version that sends GraphQL writes;
+  the translator refuses everything but its read shapes (see
+  ARCHITECTURE.md).
+- **"Access denied" page after Google sign-in.** The signed-in account
+  isn't in the `ALLOWED_DOMAIN` you set in `wrangler.toml`. Check the
+  email.
 
 ## Multi-site setup
 
