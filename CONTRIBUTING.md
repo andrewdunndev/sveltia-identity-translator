@@ -1,89 +1,66 @@
 # Contributing
 
-PRs welcome. The translator is small (~700 LOC TypeScript + a 19-case
-smoke harness) and the contribution shape is correspondingly small.
+PRs welcome. The proxy is small and the contribution shape is
+correspondingly small.
 
-## What's in scope
+## In scope
 
 - Bug fixes against the documented contract.
-- Additional IdP config factories (`microsoftEntraConfig`,
-  `oktaConfig`, etc.) following the `googleConfig` shape in
-  `src/idp.ts`.
-- Additional `Authorizer` implementations for non-YAML-file allowlist
-  storage (database, LDAP, external policy engine). Don't replace
-  `editorsYmlAuthorizer`; add alongside.
-- Decap support: a parallel set of handlers and a top-level route
-  prefix.
-- Smoke harness coverage for cases that aren't yet covered.
-- Documentation improvements, especially in `docs/` for the setup
-  walkthrough.
+- Another IdP config beside `googleConfig` in `src/idp.ts`
+  (`microsoftEntraConfig`, `oktaConfig`).
+- Another `Authorizer` for an allowlist that lives outside a YAML file
+  (database, directory, policy engine), added beside `buildAuthorizer`
+  rather than replacing it.
+- Decap support: parallel handlers under their own route prefix.
+- A route-table or `PROJECT` entry for a Sveltia call the proxy
+  refuses, with the Sveltia version that sends it.
+- Test and smoke coverage, and the setup walkthroughs in `docs/`.
 
-## What's out of scope
+## Out of scope
 
-- Features that change the contract Sveltia depends on. The proxy
-  must keep working with stock Sveltia configs.
-- Adding refresh-token machinery without a concrete reason. See
-  ARCHITECTURE.md.
-- Rate limiting, IP allowlists, or other "extra security" layers
-  that aren't pulling weight. The boundary is the JWT; reinforce
-  that boundary or step away.
+- Changes to the contract Sveltia depends on; stock Sveltia configs
+  must keep working.
+- Refresh tokens without a concrete reason (see ARCHITECTURE.md).
+- Rate limiting, IP allowlists and other layers that aren't pulling
+  weight. The boundaries are the JWT, the route table and the
+  allowlist; reinforce those.
 
-## Running checks
+## Checks
 
 ```bash
 npm run typecheck
-npm run dev   # in one terminal
+npm test                          # offline suite
+npm run lint:editors -- editors.yml.example
+npm run dev                       # in one terminal
 JWT_SECRET=$(grep JWT_SECRET .dev.vars | cut -d= -f2) npm run smoke
 ```
 
-The smoke harness against a real GitLab repo will create + delete a
-test file; ensure the configured editor identities have appropriate
-allowlist entries (see `editors.yml.example`).
+CI runs the first three on every push. The smoke harness needs a
+running Worker and a real repo; it creates and deletes a test file,
+and the identities it uses need entries matching
+`editors.yml.example`.
 
-## Coding style
+## Style
 
-- TypeScript strict mode. Don't add `any`.
-- No external dependencies beyond `yaml`. The Worker bundle is small
-  and should stay that way.
-- Comments explain *why*, not *what*. If a comment paraphrases the
-  code under it, delete the comment.
-- Match the existing module shape: handlers are top-level functions,
-  the router in `src/index.ts` calls them.
+- TypeScript strict mode; no `any`.
+- Dependencies stay at `yaml` and `graphql`.
+- Comments say why, not what; a comment that paraphrases the code
+  under it goes.
+- Handlers are top-level functions; the router in `src/worker.ts`
+  calls them.
 
-## Commit style
+## Commits
 
-Conventional commits, present tense imperative:
+One imperative sentence in sentence case, saying what changed in this
+repo:
 
 ```
-fix(graphql): allow capitalized "Mutation" in operationName
-feat(idp): add microsoftEntraConfig factory
-docs: explain author/committer split in README
+Test that CORS echoes only allowlisted origins
+Add microsoftEntraConfig beside googleConfig
 ```
-
-Sign-off (`git commit -s`) is appreciated but not required.
-
-## Upstream
-
-The translated-identity pattern is plausibly upstream-shaped for
-[`sveltia/sveltia-cms-auth`][upstream]. There's an open conversation
-to absorb this codebase as a "translated-identity mode" with the
-`IdPConfig` and `Authorizer` exposed as deployer-supplied hooks.
-
-If you're contributing here and your change is mechanically
-relevant upstream, mention it in the PR, it informs how we shape
-the eventual upstream contribution.
-
-[upstream]: https://github.com/sveltia/sveltia-cms-auth
 
 ## Reporting issues
 
-Open a GitHub issue with:
-
-- The Worker version / commit you're on.
-- The Sveltia version on the consumer site.
-- The IdP (Google Workspace / Microsoft 365 / Okta / etc.).
-- A redacted snippet of the failing request + response (curl
-  reproduction is gold).
-
-If you can reproduce against the smoke harness, paste the failing
-case output. That's usually the fastest path to a fix.
+Open a GitHub issue with the Worker version, the Sveltia version on
+the site, the identity provider, and a redacted failing request and
+response. A failing smoke case, pasted, is the fastest route to a fix.

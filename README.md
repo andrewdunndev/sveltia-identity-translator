@@ -6,229 +6,136 @@
 ![Cloudflare Workers](https://img.shields.io/badge/runtime-Cloudflare_Workers-F38020?logo=cloudflare&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6?logo=typescript&logoColor=white)
 
-A translated-identity proxy for [Sveltia CMS][sveltia]. Editors authenticate
-against your existing identity provider (Google Workspace, etc.); a single
-service-account [Personal Access Token][gl-pat] (PAT) holds the only
-credential that ever touches GitLab; commits attribute correctly to the
-editor via git's [author/committer split][git-author-committer]. Editors
-save changes without ever creating a GitLab account, learning git, or
-understanding what a commit is.
+A proxy that lets people edit a git-backed website through [Sveltia
+CMS][sveltia] without having a GitLab account. Editors sign in with the
+Google Workspace account they already have; one service-account token
+does the GitLab API calls; each commit carries the editor as its
+[author][git-author-committer] and the service account as committer. I
+built it for my kids' school, where the teachers who write the website
+had no reason to learn git, and it runs there as a [Cloudflare
+Worker][cf-workers] on the free plan.
 
-Runs as a [Cloudflare Worker][cf-workers] on the free tier.
+If your editors already have GitLab accounts, you don't need this: use
+[`sveltia-cms-auth`][sveltia-auth]. This proxy is for the case where
+the person editing and the git-host identity are not the same.
 
 [sveltia]: https://sveltiacms.app/
-[gl-pat]: https://docs.gitlab.com/user/profile/personal_access_tokens/
 [git-author-committer]: https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work
 [cf-workers]: https://developers.cloudflare.com/workers/
-
-## Who this is for
-
-You're a small org (school, nonprofit, club, side project) that:
-
-- Wants a [git-backed CMS][headless-cms] (Sveltia, Decap) for the version
-  control / portability / no-vendor-lock benefits.
-- Has a handful of non-technical editors (teachers, volunteers, staff)
-  who already live in Google Workspace, Microsoft 365, or similar.
-- Doesn't want to give them all GitLab/GitHub accounts (cost, friction,
-  password management, ongoing user-management overhead).
-- Doesn't want to pay for a hosted CMS like Sanity or Contentful (cost,
-  lock-in).
-- Wants legible code that the next volunteer can maintain.
-
-If your editors already have GitLab accounts, you don't need this. Use
-the standard [`sveltia-cms-auth`][sveltia-auth] proxy. This translator is
-specifically for the case where the editor identity and the git-host
-identity are not the same person.
-
-[headless-cms]: https://en.wikipedia.org/wiki/Headless_content_management_system
 [sveltia-auth]: https://github.com/sveltia/sveltia-cms-auth
 
-## What it does
+## Quick start
+
+You need a Google Workspace tenant, a gitlab.com group holding the
+repo Sveltia edits, a Cloudflare account, and a site already running
+Sveltia. Each step has a longer walkthrough in `docs/`.
+
+1. **GitLab.** Create a service account with Maintainer access to the
+   group and an access token with scope `api`
+   ([docs/gitlab-pat-setup.md](./docs/gitlab-pat-setup.md)).
+2. **Google.** Create an OAuth client of type "Web application" with
+   `https://<worker-hostname>/oauth/callback` as a redirect URI
+   ([docs/google-oauth-setup.md](./docs/google-oauth-setup.md)).
+3. **Cloudflare.** Configure and deploy the Worker
+   ([docs/cloudflare-deploy.md](./docs/cloudflare-deploy.md)):
+
+   ```bash
+   git clone https://github.com/andrewdunndev/sveltia-identity-translator.git
+   cd sveltia-identity-translator
+   npm install
+   cp wrangler.toml.example wrangler.toml   # set ALLOWED_DOMAIN and ALLOWED_SITES
+   cp editors.yml.example editors.yml       # declare repos and editors
+   npm run lint:editors
+   npx wrangler deploy
+   npx wrangler secret put OAUTH_CLIENT_ID
+   npx wrangler secret put OAUTH_CLIENT_SECRET
+   npx wrangler secret put GITLAB_API_TOKEN
+   npx wrangler secret put JWT_SECRET        # openssl rand -hex 32
+   curl https://<worker-hostname>/healthz    # prints "translator ok"
+   ```
+
+4. **Sveltia.** Point `admin/config.yml` at the Worker
+   ([docs/sveltia-config.md](./docs/sveltia-config.md)):
+
+   ```yaml
+   backend:
+     name: gitlab
+     repo: your-org/your-site
+     branch: main
+     api_root: https://<worker-hostname>/gitlab
+     auth_endpoint: oauth/authorize
+     base_url: https://<worker-hostname>
+     proxied: true
+   ```
+
+Open `/admin/` on your site, sign in through Google, save a test edit
+and check `git log`: the author is the editor's email, the committer
+is the service account.
+
+### Configuration
+
+Two plain variables in `wrangler.toml`:
+
+| Var | Meaning |
+|---|---|
+| `ALLOWED_DOMAIN` | The Workspace primary domain. Sign-in is refused unless the id_token's `hd` claim equals it. |
+| `ALLOWED_SITES` | Comma-separated hostnames that serve Sveltia. Each is accepted as the OAuth `site_id` and echoed as the CORS origin; an empty list refuses every site. |
+
+Four secrets, set with `wrangler secret put`: `OAUTH_CLIENT_ID`,
+`OAUTH_CLIENT_SECRET`, `GITLAB_API_TOKEN`, `JWT_SECRET`.
+
+### As a dependency
+
+The Worker is also a library, so a deployment can live in its own repo
+with nothing but an `editors.yml` and a `wrangler.toml`:
+
+```bash
+npm install github:andrewdunndev/sveltia-identity-translator#v0.2.0
+```
+
+```ts
+import editors from "../editors.yml";
+import { createWorker } from "sveltia-identity-translator";
+
+export default createWorker({ editors, name: "translator" });
+```
+
+`name` labels the `/healthz` body and the deny log lines. The consumer
+copies the `[[rules]]` block from `wrangler.toml.example` so `.yml`
+imports as text, and the `*.yml` module declaration from
+`src/editors.d.ts`. `buildAuthorizer`, `buildBranchResolver`,
+`buildIsEditor` and the `Env` type are exported alongside.
+
+## How it works
 
 ![relay flow](diagrams/relay-flow.svg)
 
-The translator does five jobs:
+1. **Sign-in.** `/oauth/authorize` sends the editor to Google with a
+   signed `state` and a PKCE challenge; the verifier sits in a
+   short-lived `__Host-` cookie. `/oauth/callback` accepts only a state
+   it signed, for a site in `ALLOWED_SITES`, from the browser holding
+   the verifier. It exchanges the code, reads the `id_token`, and
+   checks issuer, audience, expiry, `hd` and `email_verified`.
+2. **Session.** An editor listed in `editors.yml` gets an 8-hour HS256
+   JWT bound to the Worker's origin, delivered by `postMessage` to the
+   origin recorded in the state. Anyone else gets an error page.
+3. **REST proxy.** `/gitlab/*` verifies the JWT and matches the request
+   against a fixed route table of the calls Sveltia makes; anything
+   else is a 403 with no upstream call. A commit is rebuilt from the
+   fields Sveltia sends, pinned to the repo's `branch`, checked path by
+   path against `write_roots` and the editor's globs, given
+   `author_name` and `author_email`, and forwarded under the service
+   token.
+4. **GraphQL.** Sveltia reads through GraphQL and writes through REST.
+   `/gitlab/graphql` parses the document and forwards it only when it
+   is one of the project read queries Sveltia sends, for a repo the
+   editor has an entry for. Mutations and every other shape are a 403.
+5. **Synthesized identity.** `GET /user`, `GET /projects/:id/users`
+   and `GET /projects/:id/members/all/0` are answered from the JWT, so
+   Sveltia sees the editor, with id 0, as a Maintainer of each repo the
+   allowlist grants.
 
-1. **OAuth handshake.** Standard authorization-code flow against your
-   IdP. The crucial check is server-side verification of the [`hd`
-   claim][hd-claim] (and `email_verified`) on the `id_token`, not the `hd` URL hint at
-   authorize time. The hint scopes the account chooser; only the
-   server-side check enforces.
-
-2. **JWT mint.** An 8-hour [HS256][jwt-hs256] token signed with a server
-   secret, bound to the Worker's origin. Carries `sub`, `email`, `name`, enough for everything
-   downstream.
-
-3. **REST proxy.** Every API call from Sveltia goes through `/gitlab/*`.
-   The Worker validates the JWT, consults `editors.yml`, swaps the
-   editor's JWT for the GitLab service-account PAT, and forwards. On
-   commit POSTs, it injects `author_name` and `author_email` into the
-   request body so the editor's identity survives onto the commit.
-
-4. **GraphQL passthrough, read-only.** Sveltia uses GraphQL for all
-   reads (file tree, blobs, default branch) and REST for writes. The
-   upstream comment in `commits.js` explains: *"the commitCreate
-   GraphQL mutation is broken and images cannot be uploaded properly,
-   so we use the REST API instead."* The translator parses each
-   document, forwards only those read shapes, and [fails closed][fail-closed]
-   on anything else (HTTP 403).
-
-5. **Synthesized identity endpoints.** Two GitLab API endpoints aren't
-   forwarded; the translator answers them from the JWT directly. `GET /user` returns the
-   editor's identity (the PAT's userinfo would be the bot, which is
-   wrong). `GET /projects/<repo>/members/all/0` returns a fake
-   Maintainer membership (Sveltia checks repo access by user-id after
-   fetching `/user`; with our synthesized `id: 0`, the upstream call
-   404s). These aren't optional features; they're mechanical
-   requirements of the model.
-
-[hd-claim]: https://developers.google.com/identity/openid-connect/openid-connect#hd-param
-[jwt-hs256]: https://en.wikipedia.org/wiki/JSON_Web_Token
-[fail-closed]: https://en.wikipedia.org/wiki/Fail-safe#Fail-secure
-
-Authorization is a pluggable hook: `authorize(identity, repo, method,
-path) → bool`. The default impl is a YAML allowlist (`editors.yml`)
-checked into the repo with per-(email, repo, path-glob) tuples;
-default-deny. The hook shape is what matters; the YAML is one
-implementation. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the
-load-bearing design decisions.
-
-## End-to-end setup
-
-What you'll need:
-
-- A Google Workspace tenant (or other OIDC IdP with a hosted-domain
-  claim).
-- A GitLab.com group containing the repo(s) Sveltia edits.
-- A Cloudflare account on the [Workers free plan][cf-pricing] (no
-  custom domain required to start).
-- A site already running Sveltia. If you don't have one yet, see the
-  [Sveltia quickstart][sveltia-quickstart].
-
-[cf-pricing]: https://developers.cloudflare.com/workers/platform/pricing/
-[sveltia-quickstart]: https://github.com/sveltia/sveltia-cms#quick-start
-
-Estimated time, first deployment: 30–45 minutes. Subsequent deploys
-are `wrangler deploy`.
-
-The four steps below have full detail in `docs/`:
-
-1. **GitLab service account + PAT**, see
-   [docs/gitlab-pat-setup.md](./docs/gitlab-pat-setup.md).
-2. **Google OAuth client**, see
-   [docs/google-oauth-setup.md](./docs/google-oauth-setup.md).
-3. **Cloudflare Worker deploy**, see
-   [docs/cloudflare-deploy.md](./docs/cloudflare-deploy.md).
-4. **Sveltia config wiring**, see
-   [docs/sveltia-config.md](./docs/sveltia-config.md).
-
-Below is the condensed walkthrough. If anything feels unclear, the
-linked per-step docs go deeper.
-
-### 1. GitLab: create the service account and PAT
-
-The service account is a regular GitLab user with a name like
-`<org>-cms-bot`. It must be a member of the group whose repos Sveltia
-will edit, with **Maintainer** role (Developer can't push to protected
-branches; Maintainer can).
-
-You need a [group access token][gl-group-token] (or personal access
-token) with scope `api`. Set the expiry to 12 months and put a calendar
-reminder to rotate. Save the token value securely; you'll need it in
-step 3.
-
-[gl-group-token]: https://docs.gitlab.com/user/group/settings/group_access_tokens/
-
-### 2. Google: create the OAuth client
-
-In the [Google Cloud Console][gcp-console]:
-
-1. Create a project (or reuse one).
-2. Configure the [OAuth consent screen][gcp-consent]: User type
-   "Internal" if your Workspace allows it (only your org's users can
-   sign in); set the app name, support email, and authorized domains
-   to include both your Workspace primary domain and the hostname the
-   Worker will eventually run on.
-3. Create credentials → OAuth client ID → "Web application." Add
-   `https://<worker-hostname>/oauth/callback` as an Authorized
-   redirect URI. For local development, also add
-   `http://localhost:8787/oauth/callback`.
-4. Save the Client ID and Client Secret. You'll need them in step 3.
-
-[gcp-console]: https://console.cloud.google.com/
-[gcp-consent]: https://console.cloud.google.com/apis/credentials/consent
-
-### 3. Cloudflare: deploy the Worker
-
-```bash
-git clone https://github.com/andrewdunndev/sveltia-identity-translator.git
-cd sveltia-identity-translator
-npm install
-
-# Create your config files from the templates.
-cp wrangler.toml.example wrangler.toml
-cp editors.yml.example editors.yml
-
-# Edit wrangler.toml: set ALLOWED_DOMAIN to your Workspace primary
-# domain (e.g. example.org) and ALLOWED_SITES to the comma-separated
-# hostnames that serve your Sveltia admin (e.g. example.com). Sites not
-# listed are refused. Optionally set a [[routes]] block to bind the
-# Worker to a custom hostname.
-$EDITOR wrangler.toml
-
-# Edit editors.yml: declare each repo's branch and write_roots, then
-# list each editor (by their Workspace email) with the path globs they
-# can write to. See the file's comments for the schema. Default deny:
-# a repo with no write_roots accepts no writes, and an empty file
-# lets nobody sign in.
-$EDITOR editors.yml
-npm run lint:editors
-
-# Deploy. wrangler will prompt you to log in to Cloudflare.
-npx wrangler deploy
-
-# Set the four secrets. wrangler will prompt for each.
-npx wrangler secret put OAUTH_CLIENT_ID         # from step 2
-npx wrangler secret put OAUTH_CLIENT_SECRET     # from step 2
-npx wrangler secret put GITLAB_API_TOKEN        # from step 1
-npx wrangler secret put JWT_SECRET              # generate one: `openssl rand -hex 32`
-
-# Verify. Should print "translator ok".
-curl https://<worker-hostname>/healthz
-```
-
-The Worker's hostname is either `<name>.<account>.workers.dev` (free,
-auto-provisioned) or whatever custom hostname you configured via
-`[[routes]]`.
-
-### 4. Sveltia: point at the translator
-
-In your site's Sveltia `admin/config.yml`:
-
-```yaml
-backend:
-  name: gitlab
-  repo: your-org/your-site
-  branch: main
-  api_root: https://<worker-hostname>/gitlab
-  auth_endpoint: oauth/authorize
-  base_url: https://<worker-hostname>
-  proxied: true
-```
-
-Open `https://your-site.example.org/admin/`. Sveltia should redirect
-you through the Google consent screen and back. After sign-in,
-collections from your repo should populate. Make a test edit, click
-Save, and check `git log`, the commit should be authored by your
-email, committer should be the bot.
-
-If anything fails, see the per-step docs for the most common gotchas
-and the smoke harness below to isolate where the contract is breaking.
-
-## editors.yml: the allowlist
-
-Default-deny. An identity with no entry can't read or write anything
-through the translator, even if their JWT is valid.
+## editors.yml
 
 ```yaml
 repos:
@@ -248,120 +155,115 @@ editor@example.org:
     - "src/content/blog/**"
 ```
 
-Read access is repo-membership: any path glob entry under a repo
-grants read. A write must fall inside one of the repo's `write_roots`,
-carry that root's file type, and match one of the editor's own globs. Globs use standard
-syntax (`*`, `**`, `?`); other regex metacharacters are escaped. See
-`editors.yml.example` for the full schema and operational notes.
+An email with no entry cannot sign in. An entry under a repo grants
+reads on it. A write must be a canonical path inside one of the repo's
+`write_roots`, carry one of that root's extensions, and match one of
+the editor's own globs (`*`, `**`, `?`). The roots bind every editor,
+so a repo with no `write_roots` or no `branch` accepts no writes. List
+as roots only the folders your Sveltia config declares, never anything
+the build runs as code. `npm run lint:editors` checks the file and CI
+runs it on every push, because a file that fails to parse deploys as
+an empty allowlist.
 
-The allowlist is checked into the same repo as the Worker. Versioning
-it in git gives you blame, review, and rollback for free. CI lints
-the YAML on every push; a parse error would otherwise brick the
-editor flow on deploy.
+Removing an editor's entry and redeploying denies their next request,
+reads included, even on an unexpired session. Rotating `JWT_SECRET`
+ends every session at once.
 
-If you want allowlist data to live elsewhere (a database, an LDAP
-query, an external policy engine), implement the `Authorizer`
-interface in `src/authorize.ts` and wire it into `src/index.ts`.
-The hook signature is `(ctx: AuthorizeContext) => boolean`; the
-proxy doesn't care where the answer comes from.
+The allowlist is one implementation of the `Authorizer` interface in
+`src/authorize.ts`, `(ctx) => boolean` over identity, repo, method and
+path. Another source (a database, a directory query) is a new
+implementation passed to the proxy in place of `buildAuthorizer`.
 
-## Local dev
+## Security model
+
+The service token never leaves the Worker, and the Worker only spends
+it on the route table above. Everything else follows from four
+boundaries:
+
+- **Domain.** The `hd` claim on the `id_token` must equal
+  `ALLOWED_DOMAIN`. The `hd` parameter on the authorize URL only
+  filters Google's account chooser. An empty `ALLOWED_DOMAIN` refuses
+  every sign-in.
+- **Editor.** A session is minted only for an email in `editors.yml`
+  with at least one repo.
+- **Site.** The token is posted only to an origin in `ALLOWED_SITES`,
+  recorded in a state the Worker signed and bound to the browser that
+  started the flow. CORS echoes only those origins.
+- **Path.** Writes land only inside declared roots, with declared
+  extensions, on the declared branch. Paths with `..`, empty segments,
+  backslashes or control characters are refused before any check runs.
+
+Not covered: Sveltia's own UI shows every collection to every editor,
+so someone can open a collection they cannot save (the save is a 403).
+There is no rate limiting and no refresh token; a session that expires
+mid-edit means signing in again.
+
+## Status and scope
+
+- gitlab.com only; the upstream API URLs are fixed in the source.
+- Google Workspace is the only identity provider exercised. The
+  `IdPConfig` shape in `src/idp.ts` fits other OIDC providers with a
+  hosted-domain claim, but none has been tried.
+- Sveltia 0.179 or later. The access probe added in 0.179
+  (`users?search`) is what the proxy answers; the deployment this was
+  built for runs Sveltia 0.201.
+- In production at one school.
+
+## Upgrading from 0.1.0
+
+`editors.yml` gains a `repos:` section; a repo without `branch` and
+`write_roots` there accepts no writes. `ALLOWED_SITES` is a new
+required var. Session claims and lifetime changed, so editors sign in
+again after the deploy. `CHANGELOG.md` lists what moved.
+
+## Local dev and smoke test
 
 ```bash
-# Populate .dev.vars with the same secrets you set in production.
-# This file is gitignored.
-cat > .dev.vars <<EOF
+cat > .dev.vars <<EOF     # gitignored
 OAUTH_CLIENT_ID=<your client id>
 OAUTH_CLIENT_SECRET=<your client secret>
-GITLAB_API_TOKEN=<your group/personal token>
+GITLAB_API_TOKEN=<your token>
 JWT_SECRET=<openssl rand -hex 32>
 EOF
-
-# Run the Worker locally on http://localhost:8787.
-npm run dev
+npm run dev               # http://localhost:8787
+npm test                  # offline suite
 ```
 
-Visit `http://localhost:8787/healthz` to confirm. For the OAuth
-round-trip, your Google OAuth client must include
-`http://localhost:8787/oauth/callback` as an authorized redirect URI
-(see step 2).
-
-## Smoke harness
-
-The repo ships a smoke test that hits every contract Sveltia depends
-on by hand-minting JWTs against the Worker's secret:
+The smoke harness mints JWTs with `JWT_SECRET` and exercises the
+contract Sveltia depends on against a running Worker: the OAuth
+redirect, JWT checks, the route table, the synthesized endpoints,
+GraphQL read and refusal, CORS, a commit as the admin with the author
+injected, writes refused outside the editor's globs and outside the
+roots, and the token's expiry.
 
 ```bash
-# Against a local dev Worker.
-JWT_SECRET=<the-same-secret> node scripts/smoke.mjs
-
-# Against the deployed Worker.
-JWT_SECRET=<the-same-secret> node scripts/smoke.mjs \
+JWT_SECRET=<the secret> node scripts/smoke.mjs \
   --base-url https://<worker-hostname> \
-  --repo your-org/your-site \
-  --admin admin@example.org --editor editor@example.org \
-  --site example.com
+  --repo your-org/your-site --site example.com \
+  --admin admin@example.org --editor editor@example.org
 ```
 
-The harness covers OAuth redirect, JWT validation, REST routing,
-GraphQL routing + mutation rejection, allowlist enforcement (read +
-write, positive + negative), CORS preflight, synthesized identity
-endpoints, author injection, and PAT-expiry early warning. The actual
-Google round-trip is exercised separately in a browser, headless
-OAuth is brittle and the gain over local-mint coverage is small.
+`blocked` cases are environment problems the proxy cannot fix (branch
+protection refusing the service account, a token without an expiry).
+The Google round-trip itself is checked once in a browser.
 
-A pass run looks like:
+## Further reading
 
-```
-sveltia-identity-translator smoke -- http://localhost:8787
-  pass     GET /healthz returns 200 ok
-  pass     GET /oauth/authorize redirects 302 to IdP consent
-  pass     GET /gitlab/user with valid admin JWT -> 200, email matches
-  ...
-pass=18  blocked=0  fail=0
-```
+[ARCHITECTURE.md](./ARCHITECTURE.md) has the reasoning behind the
+decisions that aren't obvious from "it's a proxy": why GraphQL is
+parsed instead of forwarded, why `hd` is checked twice, why one Worker
+serves many sites, why sessions are 8 hours with no refresh, and why
+the smoke harness mints its own tokens. [CONTRIBUTING.md](./CONTRIBUTING.md)
+has the contribution shape.
 
-`blocked` cases are environment problems the translator can't fix
-(branch protection refusing the bot, expired PAT), the proxy is
-working; resolve outside the proxy.
-
-## Architecture
-
-The non-obvious design decisions are written up in
-[ARCHITECTURE.md](./ARCHITECTURE.md). Highlights:
-
-- Why GraphQL is read-only and not just rate-limited.
-- Why `hd` is checked twice (the URL hint vs the `id_token` claim).
-- Why one Worker can serve multiple sites.
-- Why JWT is 8h with no refresh token.
-- Why `editors.yml` lives in the relay's repo.
-- Why the smoke harness mints JWTs locally.
-
-If you read one supplementary file beyond this README, make it that
-one.
-
-## Contributing
-
-PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the
-contribution shape and the upstream conversation at
-[`sveltia/sveltia-cms-auth`](https://github.com/sveltia/sveltia-cms-auth).
-The translated-identity pattern is plausibly upstream-shaped; this
-repo is the staging ground for that contribution.
-
-## Prior art
-
-- [`sveltia/sveltia-cms-auth`][sveltia-auth], Sveltia's standard
-  OAuth proxy. Implements the strict 1:1 model (editor's own GitLab
-  token is what reaches the CMS). No translation hook. This
-  translator is what you'd write if you wanted that hook.
-- [`vencax/netlify-cms-github-oauth-provider`][vencax], Decap's
-  community OAuth provider, same shape, same limitation.
-- [`decaporg/decap-cms`][decap], the CMS this pattern would also
-  apply to. The Decap version of this translator is plausible but
-  unimplemented; if you build it, send a PR.
+Prior art: [`sveltia-cms-auth`][sveltia-auth] is Sveltia's own OAuth
+proxy, where the editor's GitLab token is what reaches the CMS;
+[`vencax/netlify-cms-github-oauth-provider`][vencax] is the same shape
+for Decap. Both assume the editor has a git-host account. A Decap
+version of this proxy would differ only in the `postMessage` shape; I
+haven't built one.
 
 [vencax]: https://github.com/vencax/netlify-cms-github-oauth-provider
-[decap]: https://github.com/decaporg/decap-cms
 
 ## License
 
@@ -369,4 +271,4 @@ repo is the staging ground for that contribution.
 
 ---
 
-Built by [Andrew Dunn](https://andrew.dunn.dev), with collaboration from [Andrew DeJong](https://dejong.engineering/) ([@adejong5](https://github.com/adejong5)), for the school he volunteers at. Distilled into a generic pattern other small orgs can deploy. The companion writeup is at [andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing](https://andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing/).
+Built by [Andrew Dunn](https://andrew.dunn.dev), with collaboration from [Andrew DeJong](https://dejong.engineering/) ([@adejong5](https://github.com/adejong5)), for the school he volunteers at. The companion writeup is at [andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing](https://andrew.dunn.dev/writing/enabling-editors-to-use-git-without-knowing/).
