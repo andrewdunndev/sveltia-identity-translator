@@ -15,7 +15,7 @@
 
 ### Changed
 
-- Requires Sveltia CMS 0.179 or later: its `users?search` access probe is answered by the proxy.
+- Works with Sveltia CMS 0.179 and later, which probe access with `users?search`; the proxy answers it.
 - The Worker is built by `createWorker({ editors })`, exported from the package root with `buildAuthorizer`, `buildBranchResolver`, `buildIsEditor` and the `Env` type, so another project can depend on this package. `src/index.ts` is the standalone entry.
 - New required var `ALLOWED_SITES`.
 - Session JWTs last 8 hours.
