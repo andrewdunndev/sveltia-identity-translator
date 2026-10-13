@@ -170,15 +170,19 @@ cp wrangler.toml.example wrangler.toml
 cp editors.yml.example editors.yml
 
 # Edit wrangler.toml: set ALLOWED_DOMAIN to your Workspace primary
-# domain (e.g. example.org). Optionally set a [[routes]] block to
-# bind the Worker to a custom hostname.
+# domain (e.g. example.org) and ALLOWED_SITES to the comma-separated
+# hostnames that serve your Sveltia admin (e.g. example.com). Sites not
+# listed are refused. Optionally set a [[routes]] block to bind the
+# Worker to a custom hostname.
 $EDITOR wrangler.toml
 
-# Edit editors.yml: list each editor (by their Workspace email) and
-# the repos + path globs they can write to. See the file's comments
-# for the schema. Default deny: empty file = nobody can write
-# anything.
+# Edit editors.yml: declare each repo's branch and write_roots, then
+# list each editor (by their Workspace email) with the path globs they
+# can write to. See the file's comments for the schema. Default deny:
+# a repo with no write_roots accepts no writes, and an empty file
+# lets nobody sign in.
 $EDITOR editors.yml
+npm run lint:editors
 
 # Deploy. wrangler will prompt you to log in to Cloudflare.
 npx wrangler deploy
@@ -227,9 +231,17 @@ Default-deny. An identity with no entry can't read or write anything
 through the translator, even if their JWT is valid.
 
 ```yaml
+repos:
+  your-org/your-site:
+    branch: main                  # the only branch commits may target
+    write_roots:                  # subtrees editors may ever write, by file type
+      "src/content/blog/**": [md, yml, yaml, json]
+      "public/images/uploads/**": [jpg, jpeg, png, webp, gif, avif, pdf]
+
 admin@example.org:
   your-org/your-site:
-    - "**"
+    - "src/content/blog/**"
+    - "public/images/uploads/**"
 
 editor@example.org:
   your-org/your-site:
@@ -237,7 +249,8 @@ editor@example.org:
 ```
 
 Read access is repo-membership: any path glob entry under a repo
-grants read. Write access is per-glob match. Globs use standard
+grants read. A write must fall inside one of the repo's `write_roots`,
+carry that root's file type, and match one of the editor's own globs. Globs use standard
 syntax (`*`, `**`, `?`); other regex metacharacters are escaped. See
 `editors.yml.example` for the full schema and operational notes.
 
@@ -285,7 +298,9 @@ JWT_SECRET=<the-same-secret> node scripts/smoke.mjs
 # Against the deployed Worker.
 JWT_SECRET=<the-same-secret> node scripts/smoke.mjs \
   --base-url https://<worker-hostname> \
-  --repo your-org/your-site
+  --repo your-org/your-site \
+  --admin admin@example.org --editor editor@example.org \
+  --site example.com
 ```
 
 The harness covers OAuth redirect, JWT validation, REST routing,
