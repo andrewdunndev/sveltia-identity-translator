@@ -1,24 +1,20 @@
 // IdP configuration block.
 //
-// The translator supports any OIDC provider that issues a userinfo
-// response with a hosted-domain claim (or equivalent). Google
-// Workspace is the reference implementation; Microsoft Entra and
-// Okta have analogous claims and would slot in via a parallel config
-// factory function.
+// The translator supports any OIDC provider that issues an id_token with an
+// "hd"-style hosted-domain claim. Google is one fill-in;
+// Microsoft Entra and others would work with different config values.
 //
-// The hook surface (this interface, plus the Authorizer in
-// authorize.ts) is what makes this translator upstream-shaped:
-// sveltia/sveltia-cms-auth could absorb this codebase by registering
-// a deployer-supplied IdPConfig + Authorizer at startup, and the rest
-// of the proxy stays the same.
+// This shape exists so the upstream-bound version of this Worker
+// (sveltia/sveltia-cms-auth as a translated-identity mode) can be
+// instantiated against any IdP without code changes -- only config.
 
 export interface IdPConfig {
-  /** OAuth 2.0 authorization endpoint */
+  /** OAuth 2.0 authorization endpoint (e.g. accounts.google.com/o/oauth2/v2/auth) */
   authorizeUrl: string;
   /** OAuth 2.0 token endpoint */
   tokenUrl: string;
-  /** OIDC userinfo endpoint */
-  userInfoUrl: string;
+  /** Accepted `iss` values of the id_token */
+  issuers: string[];
   /** Scopes requested at authorization (space-separated) */
   scope: string;
   /** Client ID, from the IdP's OAuth app registration */
@@ -27,12 +23,12 @@ export interface IdPConfig {
   clientSecret: string;
   /**
    * Optional hosted-domain claim. When set, the callback handler
-   * verifies the userinfo response carries this exact value. For
+   * verifies the id_token carries this exact value. For
    * Google Workspace this is the `hd` claim; the value is the
    * Workspace primary domain (e.g. `example.org`).
    */
   hdClaim?: string;
-  /** Required value of the hdClaim. Ignored if hdClaim is unset. */
+  /** Required value of the hdClaim; empty refuses every sign-in. Ignored if hdClaim is unset. */
   allowedDomain?: string;
   /**
    * IdP-specific extra params appended to the authorize URL. Google
@@ -49,28 +45,24 @@ export interface IdPEnv {
 }
 
 /**
- * Google Workspace OIDC config. The reference IdP this translator
- * ships with. Adding another IdP is a new factory function alongside
- * this one (e.g. `microsoftEntraConfig`, `oktaConfig`); the proxy and
- * OAuth handlers consume the IdPConfig interface and don't care which
- * provider populates it.
- *
- * The dual `hd` check is deliberate. The `hd` query parameter scopes
- * Google's account chooser UI to the allowed domain. The userinfo
- * `hd` claim is the cryptographic boundary. The first is convenience;
- * the second is enforcement. Removing either one weakens the model.
+ * Google Workspace OIDC config. The single fill-in shipped;
+ * adding another IdP is a new function alongside this one, not a
+ * rewrite of any consumer code.
  */
 export function googleConfig(env: IdPEnv): IdPConfig {
   return {
     authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
-    userInfoUrl: "https://www.googleapis.com/oauth2/v2/userinfo",
+    issuers: ["accounts.google.com", "https://accounts.google.com"],
     scope: "openid email profile",
     clientId: env.OAUTH_CLIENT_ID,
     clientSecret: env.OAUTH_CLIENT_SECRET,
     hdClaim: "hd",
     allowedDomain: env.ALLOWED_DOMAIN,
     extraAuthorizeParams: {
+      // UI hint: Google's account chooser pre-filters to this domain.
+      // Server-side verification of the hd claim still runs in the
+      // callback regardless of this hint.
       hd: env.ALLOWED_DOMAIN,
       access_type: "online",
     },

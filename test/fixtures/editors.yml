@@ -1,0 +1,43 @@
+# Policy the offline tests run against. stranger@example.org is
+# deliberately absent: an identity with no entry.
+repos:
+  example-org/website:
+    branch: main
+    write_roots:
+      "src/content/blog/**": &content_types [md, yml, yaml, json]
+      "src/content/classrooms/**": *content_types
+      "src/content/people/**": *content_types
+      "src/content/merch/**": *content_types
+      "public/images/uploads/**": &media_types [jpg, jpeg, png, webp, gif, avif, pdf]
+      "public/images/blog/**": *media_types
+      "public/images/classrooms/**": *media_types
+      "public/images/teachers/**": *media_types
+      "public/images/merch/**": *media_types
+  example-org/design: {}
+  example-org/translator: {}
+
+root@example.org:
+  example-org/website: &website_all
+    - "src/content/blog/**"
+    - "src/content/classrooms/**"
+    - "src/content/people/**"
+    - "src/content/merch/**"
+    - "public/images/uploads/**"
+    - "public/images/blog/**"
+    - "public/images/classrooms/**"
+    - "public/images/teachers/**"
+    - "public/images/merch/**"
+  example-org/design: ["**"]
+  example-org/translator: ["**"]
+
+editor@example.org:
+  example-org/website:
+    - "src/content/blog/**"
+
+writer@example.org:
+  example-org/website:
+    - "src/content/blog/**"
+    - "public/images/blog/**"
+
+staff@example.org:
+  example-org/website: *website_all

@@ -4,17 +4,16 @@
 # deployment. Don't commit wrangler.toml to a public repo: account_id
 # is your Cloudflare account identifier and routes leak your hostnames.
 #
-# Sensitive values (OAUTH_CLIENT_SECRET, JWT_SECRET, GITLAB_API_TOKEN)
-# are NOT set here -- they go through `wrangler secret put` and live
-# in Cloudflare's secret storage. See README.md for the full setup.
+# Sensitive values (OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET,
+# JWT_SECRET, GITLAB_API_TOKEN) are NOT set here -- they go through
+# `wrangler secret put` and live in Cloudflare's secret storage. See README.md for the full setup.
 
 name = "sveltia-identity-translator"
 main = "src/index.ts"
 compatibility_date = "2026-05-05"
-compatibility_flags = ["nodejs_compat"]
 
 # Bundle .yml files as text so editors.yml can be `import`-ed by
-# src/authorize.ts and parsed at module init.
+# src/index.ts and parsed at module init.
 rules = [
   { type = "Text", globs = ["**/*.yml"], fallthrough = true },
 ]
@@ -30,9 +29,21 @@ head_sampling_rate = 1.0
 # against the OIDC `hd` claim on every sign-in. Required.
 ALLOWED_DOMAIN = "example.org"
 
+# Comma-separated hostnames of the sites that host Sveltia. Each is
+# accepted as the OAuth `site_id` and echoed as the CORS origin; any
+# other site is refused. Required: an empty list refuses every site.
+ALLOWED_SITES = "example.com,www.example.com"
+
 # Bind the Worker to a custom hostname under one of your zones.
 # Without this, the Worker is reachable at <name>.<account>.workers.dev.
 # Adjust pattern + zone_name to match your setup.
 # [[routes]]
 # pattern = "translator.example.org/*"
 # zone_name = "example.org"
+
+# The OAuth redirect_uri and the session JWT's iss/aud come from the
+# request origin. When a route is configured, `wrangler dev` presents
+# requests under the route's host, so pin local runs to the local
+# address.
+# [dev]
+# host = "localhost:8787"

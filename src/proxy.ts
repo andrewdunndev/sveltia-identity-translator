@@ -1,36 +1,39 @@
-// GitLab REST proxy.
+// GitLab proxy.
 //
 // On every /gitlab/* request:
-//   1. validate the Authorization Bearer JWT against JWT_SECRET
-//   2. for /projects/<repo>/... calls, consult the Authorizer; deny
-//      on miss (read membership for GET; per-path glob for writes)
-//   3. swap the Authorization header to the service-account PAT
-//   4. inject author_name + author_email on commit/file POSTs so git
-//      history shows the editor as commit author (PAT owner remains
-//      the committer)
-//   5. forward to gitlab.com/api/v4
+//   1. reject non-canonical paths (400)
+//   2. validate the Authorization Bearer JWT against JWT_SECRET
+//   3. match the request against the route table; anything unmatched
+//      is denied (403) without calling upstream
+//   4. require an editors.yml identity on account routes, the repo
+//      allowlist on project routes and the per-path allowlist on
+//      commits
+//   5. swap the Authorization header to the service-account PAT
+//   6. rebuild commit POSTs from the fields Sveltia sends and inject
+//      author_name + author_email so git history shows the editor as
+//      commit author
+//   7. forward to gitlab.com/api/v4 with only the route's query
+//      parameters
 //
-// Sveltia calls GET /user to display the logged-in identity in its
-// UI. We synthesize that response from the session JWT instead of
-// forwarding, since the service-account PAT's userinfo would not be
-// the editor's. Sveltia then calls
-// /projects/<repo>/members/all/<userId> to confirm the user has
-// Developer-or-higher access to the repo. With our synthesized id=0
-// the upstream call would 404 and Sveltia would refuse to load the
-// editor UI; we synthesize the membership response too.
+// The route table is the set of GitLab REST calls Sveltia makes in
+// simple publish mode, plus the smoke test's probes. A Sveltia
+// feature that needs another endpoint or parameter is a new entry.
 
 import { verifySession, JWTError } from "./jwt";
-import type { Authorizer } from "./authorize";
+import type { Authorizer, BranchResolver } from "./authorize";
 
 const GITLAB_API = "https://gitlab.com/api/v4";
+
+// Sveltia commits carry images base64-encoded in the JSON body.
+const MAX_COMMIT_BYTES = 25 * 1024 * 1024;
 
 export interface ProxyEnv {
   JWT_SECRET: string;
   GITLAB_API_TOKEN: string;
 }
 
+// Access-Control-Allow-Origin is added per request in index.ts.
 const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type",
 };
@@ -42,24 +45,197 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-interface GitlabAction {
-  file_path?: string;
+interface CommitAction {
+  action: string;
+  file_path: string;
+  previous_path?: string;
+  content?: string;
+  encoding?: string;
 }
-interface GitlabCommitBody {
-  actions?: GitlabAction[];
-  [k: string]: unknown;
+interface CommitBody {
+  branch: string;
+  commit_message: string;
+  actions: CommitAction[];
+}
+
+const COMMIT_ACTIONS = new Set(["create", "update", "delete", "move"]);
+const OPTIONAL_ACTION_FIELDS = ["previous_path", "content", "encoding"] as const;
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// The forwarded commit is rebuilt from these fields alone, so nothing
+// the path check did not see reaches GitLab.
+function readCommit(j: unknown): CommitBody | null {
+  if (
+    !isObject(j) ||
+    typeof j.branch !== "string" ||
+    typeof j.commit_message !== "string" ||
+    !Array.isArray(j.actions) ||
+    j.actions.length === 0
+  ) {
+    return null;
+  }
+  const actions: CommitAction[] = [];
+  for (const a of j.actions) {
+    if (
+      !isObject(a) ||
+      typeof a.action !== "string" ||
+      !COMMIT_ACTIONS.has(a.action) ||
+      typeof a.file_path !== "string"
+    ) {
+      return null;
+    }
+    const out: CommitAction = { action: a.action, file_path: a.file_path };
+    for (const k of OPTIONAL_ACTION_FIELDS) {
+      const v = a[k];
+      if (v === undefined) continue;
+      if (typeof v !== "string") return null;
+      out[k] = v;
+    }
+    actions.push(out);
+  }
+  return { branch: j.branch, commit_message: j.commit_message, actions };
+}
+
+// The editor is not a real GitLab user; the service-account PAT is
+// what talks to GitLab. Synthesized responses always carry id 0.
+const SYNTHESIZED_USER_ID = 0;
+
+type RouteKind =
+  | "user" // synthesized from the JWT
+  | "members" // synthesized membership probe
+  | "users" // synthesized project-user probe
+  | "read" // forwarded read, repo allowlist applies
+  | "commit"; // project write, path allowlist applies
+
+interface RouteSpec {
+  kind: RouteKind;
+  /** Query parameters forwarded upstream; any other is dropped. */
+  query: readonly string[];
+}
+
+interface Route extends RouteSpec {
+  /** Decoded project path; null for account-level routes. */
+  repo: string | null;
+}
+
+const ACCOUNT_ROUTES = new Map<string, RouteSpec>([
+  ["user", { kind: "user", query: [] }],
+  ["avatar", { kind: "read", query: ["email", "size"] }],
+  // Smoke only: the group token's expiry.
+  ["personal_access_tokens/self", { kind: "read", query: [] }],
+]);
+
+// Matched against the raw path after projects/<repo>/. The membership
+// probe, the branch list and the tree are for the smoke only.
+const PROJECT_GET_ROUTES: Array<[RegExp, RouteSpec]> = [
+  [/^users$/, { kind: "users", query: [] }],
+  [/^members\/all\/0$/, { kind: "members", query: [] }],
+  [/^repository\/files\/[^/]+\/raw$/, { kind: "read", query: ["lfs", "ref"] }],
+  [/^repository\/commits$/, { kind: "read", query: ["ref_name", "path", "per_page"] }],
+  [/^repository\/commits\/[^/]+\/statuses$/, { kind: "read", query: ["per_page"] }],
+  [/^repository\/branches(\/[^/]+)?$/, { kind: "read", query: [] }],
+  [/^repository\/tree$/, { kind: "read", query: ["path", "per_page", "recursive"] }],
+  [/^deployments$/, { kind: "read", query: ["order_by", "sort", "per_page", "updated_after"] }],
+];
+
+const COMMIT_ROUTE: RouteSpec = { kind: "commit", query: [] };
+
+// Routing runs on the raw segments so an encoded "/" can't be taken
+// for a separator; only the repo segment is decoded.
+function matchRoute(method: string, raw: string[], repo: string): Route | null {
+  if (raw[0] !== "projects") {
+    const spec = method === "GET" ? ACCOUNT_ROUTES.get(raw.join("/")) : undefined;
+    return spec ? { ...spec, repo: null } : null;
+  }
+  if (raw.length < 3) return null;
+  const tail = raw.slice(2).join("/");
+  if (method === "GET") {
+    for (const [re, spec] of PROJECT_GET_ROUTES) {
+      if (re.test(tail)) return { ...spec, repo };
+    }
+  }
+  if (method === "POST" && tail === "repository/commits") return { ...COMMIT_ROUTE, repo };
+  return null;
+}
+
+function forwardedSearch(params: URLSearchParams, keys: readonly string[]): string {
+  const out = new URLSearchParams();
+  for (const [k, v] of params) {
+    if (keys.includes(k)) out.append(k, v);
+  }
+  const s = out.toString();
+  return s ? `?${s}` : "";
+}
+
+/** The body as text, or null once it exceeds `limit` bytes. */
+export async function readLimitedText(request: Request, limit: number): Promise<string | null> {
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > limit) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+function isDotOrEmpty(seg: string): boolean {
+  return seg === "" || seg === "." || seg === "..";
+}
+
+/**
+ * Split the path after /gitlab/ into raw segments, rejecting anything
+ * non-canonical: empty segments, "." or ".." (also percent-encoded),
+ * backslashes, bad percent-encoding. Upstream normalizes these, so a
+ * request in this form that dodged route matching would reach GitLab
+ * under the PAT.
+ */
+function parseSegments(pathname: string): { raw: string[]; decoded: string[] } | null {
+  const raw = pathname.slice("/gitlab/".length).split("/");
+  const decoded: string[] = [];
+  for (const r of raw) {
+    let d: string;
+    try {
+      d = decodeURIComponent(r);
+    } catch {
+      return null;
+    }
+    if (isDotOrEmpty(d) || d.includes("\\")) return null;
+    decoded.push(d);
+  }
+  return { raw, decoded };
 }
 
 export async function handleGitlabProxy(
   request: Request,
   env: ProxyEnv,
   authorize: Authorizer,
+  branchFor: BranchResolver,
+  name: string,
 ): Promise<Response> {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  // Step 1: Authentication.
+  const reqUrl = new URL(request.url);
+  const parsed = parseSegments(reqUrl.pathname);
+  if (!parsed) {
+    return jsonResponse({ error: "bad_request", detail: "non-canonical path" }, 400);
+  }
+
   const auth = request.headers.get("authorization") ?? "";
   if (!auth.toLowerCase().startsWith("bearer ")) {
     return jsonResponse({ error: "unauthorized", detail: "missing bearer token" }, 401);
@@ -68,22 +244,24 @@ export async function handleGitlabProxy(
 
   let session;
   try {
-    session = await verifySession(token, env.JWT_SECRET);
+    session = await verifySession(token, env.JWT_SECRET, reqUrl.origin);
   } catch (err) {
     const detail = err instanceof JWTError ? err.message : "invalid jwt";
     return jsonResponse({ error: "unauthorized", detail }, 401);
   }
 
-  const reqUrl = new URL(request.url);
-  const apiPath = reqUrl.pathname.replace(/^\/gitlab/, "");
-  const SYNTHESIZED_USER_ID = 0;
+  const route = matchRoute(request.method, parsed.raw, parsed.decoded[1] ?? "");
+  if (!route) {
+    console.log(
+      `${name}.deny.route email=${session.email} method=${request.method} path=${reqUrl.pathname}`,
+    );
+    return jsonResponse({ error: "forbidden", detail: `endpoint not served by ${name}` }, 403);
+  }
+
+  const identity = { email: session.email, name: session.name };
   const usernameFromEmail = session.email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "_");
 
-  // Synthesize /user from the JWT. Sveltia calls this to discover
-  // the editor's identity. We always return id: 0 -- the editor is
-  // not a real GitLab user; the service-account PAT is what actually
-  // talks to GitLab.
-  if (apiPath === "/user" && request.method === "GET") {
+  if (route.kind === "user") {
     return jsonResponse(
       {
         id: SYNTHESIZED_USER_ID,
@@ -98,49 +276,30 @@ export async function handleGitlabProxy(
     );
   }
 
-  const projectMatch = apiPath.match(/^\/projects\/([^/]+)/);
-  const repo = projectMatch ? decodeURIComponent(projectMatch[1]) : "";
-
-  // Read-side allowlist enforcement on /projects/<repo>/... calls.
-  // The authorizer's read branch returns true only when the identity
-  // has an editors.yml entry for the repo, regardless of path:
-  // segmentation of read access is the Sveltia config's job
-  // (collection visibility), not the translator's. Calls outside
-  // /projects/ (e.g. /user) bypass this check.
-  const isWrite = !["GET", "HEAD"].includes(request.method);
-  if (!isWrite && projectMatch) {
-    const ok = authorize({
-      identity: { email: session.email, name: session.name },
-      repo,
-      method: request.method,
-      path: "*",
-    });
+  // Reads need only an editors.yml entry for the repo, or any entry
+  // on account routes; segmenting read access is the Sveltia config's
+  // job.
+  if (route.kind !== "commit") {
+    const ok = authorize({ identity, repo: route.repo, method: request.method, path: "*" });
     if (!ok) {
+      const target = route.repo ?? "account routes";
       console.log(
-        `translator.deny.read email=${session.email} repo=${repo} method=${request.method}`,
+        `${name}.deny.read email=${session.email} repo=${target} method=${request.method}`,
       );
       return jsonResponse(
         {
           error: "forbidden",
-          detail: `read access denied to ${repo} for ${session.email}`,
+          detail: `read access denied to ${target} for ${session.email}`,
         },
         403,
       );
     }
   }
 
-  // Synthesize membership lookups. Our synthesized user_id (0)
-  // doesn't exist on GitLab, so the upstream call would 404 and
-  // Sveltia would refuse to load the editor UI. editors.yml is the
-  // source of truth for whether a translated identity can operate on
-  // a repo, so we report Maintainer (40) when the identity passed
-  // the read-allowlist check above, otherwise 404.
-  const memberMatch = apiPath.match(/^\/projects\/[^/]+\/members\/all\/(\d+)$/);
-  if (
-    memberMatch &&
-    request.method === "GET" &&
-    Number(memberMatch[1]) === SYNTHESIZED_USER_ID
-  ) {
+  // Sveltia asks GitLab whether the editor may use the repo. Id 0
+  // exists nowhere upstream, so the allowlist verdict above is the
+  // answer.
+  if (route.kind === "members") {
     return jsonResponse(
       {
         id: SYNTHESIZED_USER_ID,
@@ -155,114 +314,111 @@ export async function handleGitlabProxy(
       200,
     );
   }
+  if (route.kind === "users") {
+    return jsonResponse(
+      [
+        {
+          id: SYNTHESIZED_USER_ID,
+          username: usernameFromEmail,
+          name: session.name,
+          state: "active",
+          avatar_url: "",
+          web_url: "",
+        },
+      ],
+      200,
+    );
+  }
 
-  // Write-side allowlist enforcement.
-  const writePaths: string[] = [];
   let bodyText: string | null = null;
-
-  if (isWrite) {
-    bodyText = await request.text();
-
-    // Single-file ops: /projects/<repo>/repository/files/<file_path>
-    const fileMatch = apiPath.match(/^\/projects\/[^/]+\/repository\/files\/([^?]+)/);
-    if (fileMatch) {
-      writePaths.push(decodeURIComponent(fileMatch[1]));
+  if (route.kind === "commit") {
+    const repo = route.repo ?? "";
+    const ct = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (ct !== "application/json") {
+      return jsonResponse(
+        { error: "bad_request", detail: "commit body must be application/json" },
+        400,
+      );
     }
-
-    // Commit op: /projects/<repo>/repository/commits with actions[].
-    if (apiPath.endsWith("/repository/commits") && bodyText) {
-      try {
-        const body = JSON.parse(bodyText) as GitlabCommitBody;
-        for (const a of body.actions ?? []) {
-          if (a.file_path) writePaths.push(a.file_path);
-        }
-      } catch {
-        // Malformed body. Let the upstream return its own 400; the
-        // allowlist check passes vacuously since there are no paths.
-      }
+    const text = await readLimitedText(request, MAX_COMMIT_BYTES);
+    if (text === null) {
+      return jsonResponse({ error: "payload_too_large", detail: "commit body too large" }, 413);
     }
-
-    // Deny if no path was extractable for a write to a /projects path.
-    // Catches odd write endpoints that aren't enumerated above.
-    if (projectMatch && writePaths.length === 0) {
-      const allowsAnyWrite = authorize({
-        identity: { email: session.email, name: session.name },
-        repo,
-        method: request.method,
-        path: "*",
-      });
-      if (!allowsAnyWrite) {
-        console.log(
-          `translator.deny.write_unknown email=${session.email} repo=${repo} method=${request.method} path=${apiPath}`,
-        );
-        return jsonResponse(
-          {
-            error: "forbidden",
-            detail: `editor ${session.email} attempted a write to ${repo} that the translator does not understand; tighten the request or extend the proxy`,
-          },
-          403,
-        );
-      }
-    }
-
-    for (const path of writePaths) {
-      const ok = authorize({
-        identity: { email: session.email, name: session.name },
-        repo,
-        method: request.method,
-        path,
-      });
-      if (!ok) {
-        console.log(
-          `translator.deny.write email=${session.email} repo=${repo} method=${request.method} path=${path}`,
-        );
-        return jsonResponse(
-          {
-            error: "forbidden",
-            detail: `editor ${session.email} not allowed to write ${path} in ${repo}`,
-          },
-          403,
-        );
-      }
-    }
-  }
-
-  // Author injection. GitLab's commits and files endpoints accept
-  // top-level author_name + author_email. The PAT's owner is the
-  // committer; the JWT identity is the author. Git history shows
-  // the editor.
-  if (
-    isWrite &&
-    bodyText &&
-    (apiPath.endsWith("/repository/commits") ||
-      /^\/projects\/[^/]+\/repository\/files\//.test(apiPath))
-  ) {
+    let json: unknown;
     try {
-      const body = JSON.parse(bodyText) as Record<string, unknown>;
-      body.author_name = session.name;
-      body.author_email = session.email;
-      bodyText = JSON.stringify(body);
+      json = JSON.parse(text);
     } catch {
-      // Leave bodyText as-is; GitLab will return 400 on malformed JSON.
+      return jsonResponse({ error: "bad_request", detail: "invalid json" }, 400);
     }
+
+    const commit = readCommit(json);
+    if (!commit) {
+      console.log(
+        `${name}.deny.write_unknown email=${session.email} repo=${repo} method=${request.method}`,
+      );
+      return jsonResponse(
+        {
+          error: "forbidden",
+          detail: `editor ${session.email} attempted a write to ${repo} that ${name} does not understand`,
+        },
+        403,
+      );
+    }
+
+    if (commit.branch !== branchFor(repo)) {
+      console.log(
+        `${name}.deny.branch email=${session.email} repo=${repo} branch=${commit.branch}`,
+      );
+      return jsonResponse(
+        {
+          error: "forbidden",
+          detail: `editor ${session.email} may not commit to branch ${commit.branch} in ${repo}`,
+        },
+        403,
+      );
+    }
+
+    for (const a of commit.actions) {
+      for (const path of [a.file_path, a.previous_path]) {
+        if (path === undefined) continue;
+        const ok =
+          !path.split("/").some(isDotOrEmpty) &&
+          authorize({ identity, repo, method: request.method, path });
+        if (!ok) {
+          console.log(
+            `${name}.deny.write email=${session.email} repo=${repo} method=${request.method} path=${path}`,
+          );
+          return jsonResponse(
+            {
+              error: "forbidden",
+              detail: `editor ${session.email} not allowed to write ${path} in ${repo}`,
+            },
+            403,
+          );
+        }
+      }
+    }
+
+    // The PAT's owner is the committer; the JWT identity is the author.
+    bodyText = JSON.stringify({
+      ...commit,
+      author_name: session.name,
+      author_email: session.email,
+    });
   }
 
-  // Forward.
-  const upstreamUrl = `${GITLAB_API}${apiPath}${reqUrl.search}`;
-  const ct = request.headers.get("content-type") ?? "application/json";
-  const upstream = await fetch(upstreamUrl, {
-    method: request.method,
-    headers: {
-      authorization: `Bearer ${env.GITLAB_API_TOKEN}`,
-      "content-type": ct,
-      accept: "application/json",
-    },
-    body: bodyText,
-  });
+  const search = forwardedSearch(reqUrl.searchParams, route.query);
+  const upstreamUrl = `${GITLAB_API}/${parsed.raw.join("/")}${search}`;
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${env.GITLAB_API_TOKEN}`,
+    accept: "application/json",
+  };
+  if (bodyText !== null) headers["content-type"] = "application/json";
+  const upstream = await fetch(upstreamUrl, { method: request.method, headers, body: bodyText });
 
   const respBody = await upstream.arrayBuffer();
-  const headers = new Headers(CORS_HEADERS);
+  const respHeaders = new Headers(CORS_HEADERS);
   const respCt = upstream.headers.get("content-type");
-  if (respCt) headers.set("content-type", respCt);
-  return new Response(respBody, { status: upstream.status, headers });
+  if (respCt) respHeaders.set("content-type", respCt);
+  return new Response(respBody, { status: upstream.status, headers: respHeaders });
 }

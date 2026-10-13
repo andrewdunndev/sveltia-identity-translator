@@ -1,6 +1,6 @@
 {
   "name": "sveltia-identity-translator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Translated-identity proxy for Sveltia CMS: editors authenticate against your existing IdP (Google Workspace, etc) while a single service-account PAT does the GitLab API calls. Editors save changes without ever touching git.",
   "type": "module",
   "license": "MIT",
@@ -18,18 +18,33 @@
     "gitlab",
     "translated-identity"
   ],
+  "exports": {
+    ".": "./src/worker.ts"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "editors.yml.example",
+    "wrangler.toml.example",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "test": "node --import ./test/register.mjs --test \"test/*.test.mjs\"",
+    "lint:editors": "node scripts/lint-editors.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
+    "graphql": "17.0.2",
     "yaml": "^2.5.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250505.0",
-    "typescript": "^5.5.0",
-    "wrangler": "^4.0.0"
+    "@cloudflare/workers-types": "5.20261010.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.149.0"
   }
 }

@@ -1,0 +1,7 @@
+repos:
+  g/r:
+    branch: main
+    write_roots:
+      "c/**": [md, png]
+e@example.org:
+  g/r: ["**"]

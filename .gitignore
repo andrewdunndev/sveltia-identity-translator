@@ -3,6 +3,6 @@ dist/
 .wrangler/
 .dev.vars
 wrangler.toml
-editors.yml
+/editors.yml
 *.log
 .DS_Store

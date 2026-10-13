@@ -5,11 +5,11 @@
 // Validates the full proxy contract Sveltia depends on: OAuth
 // redirect, JWT validation, REST passthrough, GraphQL passthrough,
 // allowlist enforcement (read and write), author injection, mutation
-// rejection, CORS preflight. No real OAuth round-trip is exercised
-// here -- we hand-mint JWTs using JWT_SECRET. That covers everything
-// past the IdP (~95% of the surface). The IdP side is tested
-// separately by visiting /oauth/authorize in a browser and watching
-// for the 302 + provider consent screen.
+// rejection, CORS preflight. No real OAuth round-trip is
+// exercised here -- we hand-mint JWTs using JWT_SECRET. That
+// covers everything past the IdP (~95% of the surface). The IdP
+// side is tested separately by visiting /oauth/authorize in a
+// browser and watching for the 302 + consent screen.
 //
 // Usage:
 //   JWT_SECRET=<the secret> node scripts/smoke.mjs
@@ -18,12 +18,18 @@
 // Default base URL: http://localhost:8787 (run `npx wrangler dev` in
 // another terminal first; populate `.dev.vars` with the same secret).
 //
-// Required identities in editors.yml:
-//   admin@example.org             with your-org/your-site: ["**"]
-//   smoke_editor@example.org      with your-org/your-site: ["src/content/blog/**"]
-//
-// You can override the repo via --repo:
-//   JWT_SECRET=... node scripts/smoke.mjs --repo your-org/your-site
+// Options (defaults in parentheses):
+//   --base-url      Worker origin (http://localhost:8787)
+//   --repo          GitLab project path to exercise (example-org/website)
+//   --admin         identity with write access to every write root of --repo
+//                   (admin@example.org)
+//   --editor        identity limited to ["src/content/blog/**"] on --repo
+//                   (editor@example.org)
+//   --stranger      identity with no editors.yml entry (stranger@example.org)
+//   --domain        ALLOWED_DOMAIN of the deployment (the --admin email domain)
+//   --site          a hostname in ALLOWED_SITES (the --domain value)
+//   --token-name    name of the GitLab access token behind GITLAB_API_TOKEN;
+//                   labels the expiry check (translator)
 
 import { argv, env, exit } from "node:process";
 import { webcrypto } from "node:crypto";
@@ -34,11 +40,15 @@ function readArg(flag) {
 }
 
 const baseUrl = (readArg("--base-url") || "http://localhost:8787").replace(/\/+$/, "");
-const REPO = readArg("--repo") || "your-org/your-site";
+const REPO = readArg("--repo") || "example-org/website";
 const REPO_ENC = encodeURIComponent(REPO);
+const GROUP = REPO.split("/")[0];
 const ADMIN_EMAIL = readArg("--admin") || "admin@example.org";
-const EDITOR_EMAIL = readArg("--editor") || "smoke_editor@example.org";
-const STRANGER_EMAIL = readArg("--stranger") || "nobody@example.org";
+const EDITOR_EMAIL = readArg("--editor") || "editor@example.org";
+const STRANGER_EMAIL = readArg("--stranger") || "stranger@example.org";
+const DOMAIN = readArg("--domain") || ADMIN_EMAIL.split("@")[1];
+const SITE = readArg("--site") || DOMAIN;
+const TOKEN_NAME = readArg("--token-name") || "translator";
 
 const SECRET = env.JWT_SECRET;
 if (!SECRET) {
@@ -54,11 +64,7 @@ function b64url(bytes) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let s = "";
   for (const b of u8) s += String.fromCharCode(b);
-  return Buffer.from(s, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return Buffer.from(s, "binary").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function b64urlString(s) {
@@ -77,7 +83,8 @@ async function importKey(secret, usage) {
 
 async function mintJwt(email, name, ttlSeconds = 600) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = { sub: email, name, email, iat: now, exp: now + ttlSeconds };
+  const origin = new URL(baseUrl).origin;
+  const payload = { sub: email, name, email, iss: origin, aud: origin, iat: now, exp: now + ttlSeconds };
   const header = b64urlString(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const body = b64urlString(JSON.stringify(payload));
   const data = `${header}.${body}`;
@@ -118,9 +125,7 @@ async function expect(name, fn) {
 
 function assertEq(actual, expected, label) {
   if (actual !== expected) {
-    throw new Error(
-      `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
+    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
 }
 
@@ -134,16 +139,12 @@ async function req(path, init = {}) {
 
 // ---------------- the cases ----------------
 
-console.log(`sveltia-identity-translator smoke -- ${baseUrl}`);
-console.log(`  repo:      ${REPO}`);
-console.log(`  admin:     ${ADMIN_EMAIL}`);
-console.log(`  editor:    ${EDITOR_EMAIL}`);
-console.log(`  stranger:  ${STRANGER_EMAIL}`);
+console.log(`smoke -- ${baseUrl}`);
 console.log("");
 
 const adminJwt = await mintJwt(ADMIN_EMAIL, "Smoke Admin");
 const editorJwt = await mintJwt(EDITOR_EMAIL, "Smoke Editor");
-const strangerJwt = await mintJwt(STRANGER_EMAIL, "Stranger");
+const stranger = await mintJwt(STRANGER_EMAIL, "Stranger");
 
 console.log("liveness + redirects");
 
@@ -151,20 +152,26 @@ await expect("GET /healthz returns 200 ok", async () => {
   const r = await req("/healthz");
   assertEq(r.status, 200, "status");
   const body = await r.text();
-  assertTrue(body.startsWith("translator ok"), `body was ${JSON.stringify(body)}`);
+  assertTrue(body.endsWith(" ok\n"), `body was ${JSON.stringify(body)}`);
 });
 
-await expect("GET /oauth/authorize redirects 302 to IdP consent", async () => {
-  const r = await req("/oauth/authorize?provider=gitlab&site_id=cms.example.org&scope=api");
+await expect("GET /oauth/authorize with an unlisted site_id -> 400, no redirect", async () => {
+  const r = await req("/oauth/authorize?provider=gitlab&site_id=evil.example&scope=api");
+  assertEq(r.status, 400, "status");
+  assertEq(r.headers.get("location"), null, "location");
+});
+
+await expect("GET /oauth/authorize redirects 302 to Google", async () => {
+  const r = await req(`/oauth/authorize?provider=gitlab&site_id=${SITE}&scope=api`);
   assertEq(r.status, 302, "status");
   const loc = r.headers.get("location") ?? "";
-  assertTrue(/^https:\/\/.*\/(o\/oauth2|oauth2|authorize)/.test(loc), `location ${loc}`);
+  assertTrue(loc.startsWith("https://accounts.google.com/"), `location ${loc}`);
   const u = new URL(loc);
   assertTrue(u.searchParams.has("client_id"), "client_id present");
-  assertTrue(
-    u.searchParams.get("state") && u.searchParams.get("state").length > 10,
-    "state present",
-  );
+  assertEq(u.searchParams.get("hd"), DOMAIN, "hd param");
+  assertEq(u.searchParams.get("code_challenge_method"), "S256", "PKCE method");
+  assertTrue((r.headers.get("set-cookie") ?? "").startsWith("__Host-translator_pkce="), "PKCE cookie");
+  assertTrue(u.searchParams.get("state") && u.searchParams.get("state").length > 10, "state present");
 });
 
 console.log("");
@@ -175,7 +182,6 @@ await expect("GET /gitlab/user with valid admin JWT -> 200, email matches", asyn
   assertEq(r.status, 200, "status");
   const j = await r.json();
   assertEq(j.email, ADMIN_EMAIL, "email");
-  assertEq(j.id, 0, "synthesized id");
 });
 
 await expect("GET /gitlab/user without JWT -> 401", async () => {
@@ -202,48 +208,98 @@ await expect("GET branches via admin JWT (allowed repo) -> 200", async () => {
 
 await expect("GET branches via stranger JWT (no entry) -> 403", async () => {
   const r = await req(`/gitlab/projects/${REPO_ENC}/repository/branches`, {
-    headers: { authorization: `Bearer ${strangerJwt}` },
+    headers: { authorization: `Bearer ${stranger}` },
   });
   assertEq(r.status, 403, "status");
 });
 
-await expect(
-  "GET /projects/<repo>/members/all/0 (synthesized) -> 200, access_level 40",
-  async () => {
-    const r = await req(`/gitlab/projects/${REPO_ENC}/members/all/0`, {
-      headers: { authorization: `Bearer ${adminJwt}` },
-    });
-    assertEq(r.status, 200, "status");
-    const j = await r.json();
-    assertEq(j.access_level, 40, "access_level");
-    assertEq(j.id, 0, "id");
-    assertEq(j.state, "active", "state");
-  },
-);
+await expect("GET /projects/<repo>/members/all/0 (synthesized) -> 200, access_level 40", async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/members/all/0`, {
+    headers: { authorization: `Bearer ${adminJwt}` },
+  });
+  assertEq(r.status, 200, "status");
+  const j = await r.json();
+  assertEq(j.access_level, 40, "access_level");
+  assertEq(j.id, 0, "id");
+  assertEq(j.state, "active", "state");
+});
 
-await expect(
-  "GET /projects/<repo>/members/all/0 via stranger -> 403 (no editors.yml entry)",
-  async () => {
-    const r = await req(`/gitlab/projects/${REPO_ENC}/members/all/0`, {
-      headers: { authorization: `Bearer ${strangerJwt}` },
-    });
-    assertEq(r.status, 403, "status");
-  },
-);
+await expect("GET /projects/<repo>/members/all/0 via stranger -> 403 (no editors.yml entry)", async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/members/all/0`, {
+    headers: { authorization: `Bearer ${stranger}` },
+  });
+  assertEq(r.status, 403, "status");
+});
+
+// Sveltia asserts the users list contains its own account id; the
+// synthesized editor (id 0) never appears upstream.
+await expect("GET /projects/<repo>/users?search (synthesized) -> 200, list contains id 0", async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/users?search=smoke`, {
+    headers: { authorization: `Bearer ${adminJwt}` },
+  });
+  assertEq(r.status, 200, "status");
+  const j = await r.json();
+  assertTrue(Array.isArray(j), "response is an array");
+  assertTrue(
+    j.some((u) => u.id === 0),
+    "list contains the synthesized editor (id 0)",
+  );
+});
+
+await expect("GET /projects/<repo>/users?search via stranger -> 403 (no editors.yml entry)", async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/users?search=nobody`, {
+    headers: { authorization: `Bearer ${stranger}` },
+  });
+  assertEq(r.status, 403, "status");
+});
+
+console.log("");
+console.log("REST: default-deny");
+
+await expect("GET /gitlab//projects/<repo>/... (empty segment) -> 400/403, never 2xx", async () => {
+  const file = encodeURIComponent("src/content/blog/x.md");
+  const r = await req(`/gitlab//projects/${REPO_ENC}/repository/files/${file}/raw?ref=main`, {
+    headers: { authorization: `Bearer ${stranger}` },
+  });
+  assertTrue(r.status === 400 || r.status === 403, `status ${r.status}`);
+});
+
+await expect("GET a path outside the route table -> 403", async () => {
+  const r = await req(`/gitlab/groups/${GROUP}`, {
+    headers: { authorization: `Bearer ${adminJwt}` },
+  });
+  assertEq(r.status, 403, "status");
+});
+
+await expect("GET /projects/constructor/... -> 403 (not an allowlisted repo)", async () => {
+  const r = await req("/gitlab/projects/constructor/repository/tree", {
+    headers: { authorization: `Bearer ${adminJwt}` },
+  });
+  assertEq(r.status, 403, "status");
+});
 
 console.log("");
 console.log("CORS preflight");
 
-await expect("OPTIONS /gitlab/anything -> 204 with CORS headers", async () => {
+await expect("OPTIONS /gitlab/anything from an allowed origin -> 204 with CORS headers", async () => {
   const r = await req(`/gitlab/projects/${REPO_ENC}/repository/files/whatever`, {
     method: "OPTIONS",
+    headers: { origin: `https://${SITE}` },
   });
   assertEq(r.status, 204, "status");
-  assertEq(r.headers.get("access-control-allow-origin"), "*", "ACAO");
+  assertEq(r.headers.get("access-control-allow-origin"), `https://${SITE}`, "ACAO");
   const methods = (r.headers.get("access-control-allow-methods") ?? "").toUpperCase();
   for (const m of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
     assertTrue(methods.includes(m), `ACAM contains ${m}`);
   }
+});
+
+await expect("OPTIONS /gitlab/anything from an unlisted origin -> no ACAO", async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/repository/files/whatever`, {
+    method: "OPTIONS",
+    headers: { origin: "https://evil.example" },
+  });
+  assertEq(r.headers.get("access-control-allow-origin"), null, "ACAO");
 });
 
 console.log("");
@@ -251,23 +307,17 @@ console.log("GraphQL: routing, allowlist, mutation rejection");
 
 const RR_QUERY = `query($fullPath: ID!) { project(fullPath: $fullPath) { repository { rootRef } } }`;
 
-await expect(
-  "POST /gitlab/graphql with rootRef query (allowed repo) -> 200, data.project.repository.rootRef present",
-  async () => {
-    const r = await req("/gitlab/graphql", {
-      method: "POST",
-      headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
-      body: JSON.stringify({ query: RR_QUERY, variables: { fullPath: REPO } }),
-    });
-    assertEq(r.status, 200, "status");
-    const j = await r.json();
-    assertTrue(
-      j.data && j.data.project,
-      `expected data.project, got ${JSON.stringify(j).slice(0, 200)}`,
-    );
-    assertTrue(typeof j.data.project.repository.rootRef === "string", "rootRef is a string");
-  },
-);
+await expect("POST /gitlab/graphql with rootRef query (allowed repo) -> 200, data.project.repository.rootRef present", async () => {
+  const r = await req("/gitlab/graphql", {
+    method: "POST",
+    headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
+    body: JSON.stringify({ query: RR_QUERY, variables: { fullPath: REPO } }),
+  });
+  assertEq(r.status, 200, "status");
+  const j = await r.json();
+  assertTrue(j.data && j.data.project, `expected data.project, got ${JSON.stringify(j).slice(0, 200)}`);
+  assertTrue(typeof j.data.project.repository.rootRef === "string", "rootRef is a string");
+});
 
 await expect("POST /gitlab/graphql with mutation in body -> 403", async () => {
   const r = await req("/gitlab/graphql", {
@@ -294,7 +344,7 @@ await expect("POST /gitlab/graphql with disallowed fullPath -> 403", async () =>
   const r = await req("/gitlab/graphql", {
     method: "POST",
     headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
-    body: JSON.stringify({ query: RR_QUERY, variables: { fullPath: "your-org/no-such-repo" } }),
+    body: JSON.stringify({ query: RR_QUERY, variables: { fullPath: `${GROUP}/no-such-repo` } }),
   });
   assertEq(r.status, 403, "status");
 });
@@ -303,94 +353,129 @@ console.log("");
 console.log("REST: write allowlist + author injection");
 
 const ts = new Date().toISOString().replace(/[:.]/g, "-");
-const adminPath = `.translator-smoke/${ts}.txt`;
-const adminContent = `translator smoke run at ${ts}\nbase=${baseUrl}\n`;
+const smokePath = `src/content/blog/.translator-smoke-admin-${ts}.md`;
+const smokeContent = `translator smoke run at ${ts}\nbase=${baseUrl}\n`;
 
-await expect(
-  `POST /commits creates ${adminPath} with author=admin`,
-  async () => {
-    const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        branch: "main",
-        commit_message: `translator smoke ${ts}`,
-        actions: [{ action: "create", file_path: adminPath, content: adminContent }],
-      }),
-    });
-    if (r.status === 403) {
-      const text = await r.text();
-      if (/not allowed to push/i.test(text)) {
-        throw new EnvBlockedError(
-          `GitLab refused push (branch protection). Translator forwarded correctly. Resolve at the project: ${text.slice(0, 200)}`,
-        );
-      }
-      throw new Error(`translator returned 403: ${text.slice(0, 300)}`);
+await expect(`POST /commits creates ${smokePath} with author=${ADMIN_EMAIL}`, async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      branch: "main",
+      commit_message: `translator smoke ${ts}`,
+      actions: [
+        {
+          action: "create",
+          file_path: smokePath,
+          content: smokeContent,
+        },
+      ],
+    }),
+  });
+  if (r.status === 403) {
+    const text = await r.text();
+    if (/not allowed to push/i.test(text)) {
+      throw new EnvBlockedError(
+        `GitLab refused push (branch protection). The translator forwarded correctly. Resolve at the project: ${text.slice(0, 200)}`,
+      );
     }
-    if (r.status !== 201) {
-      const text = await r.text();
-      throw new Error(`expected 201, got ${r.status}: ${text.slice(0, 300)}`);
-    }
-    const j = await r.json();
-    assertEq(j.author_email, ADMIN_EMAIL, "commit.author_email");
-    assertEq(j.author_name, "Smoke Admin", "commit.author_name");
-  },
-);
+    throw new Error(`translator returned 403: ${text.slice(0, 300)}`);
+  }
+  if (r.status !== 201) {
+    const text = await r.text();
+    throw new Error(`expected 201, got ${r.status}: ${text.slice(0, 300)}`);
+  }
+  const j = await r.json();
+  assertEq(j.author_email, ADMIN_EMAIL, "commit.author_email");
+  assertEq(j.author_name, "Smoke Admin", "commit.author_name");
+});
 
-await expect("POST /commits as editor to disallowed path -> 403", async () => {
+await expect(`POST /commits as the editor to disallowed path -> 403`, async () => {
   const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
     method: "POST",
     headers: { authorization: `Bearer ${editorJwt}`, "content-type": "application/json" },
     body: JSON.stringify({
       branch: "main",
       commit_message: "smoke negative",
-      actions: [{ action: "create", file_path: "src/pages/forbidden.astro", content: "blocked" }],
+      actions: [
+        {
+          action: "create",
+          file_path: "src/pages/forbidden.astro",
+          content: "blocked",
+        },
+      ],
     }),
   });
   assertEq(r.status, 403, "status");
 });
 
-const editorPath = `src/content/blog/.translator-smoke-${ts}.md`;
-await expect(
-  `POST /commits as editor to allowed path under blog -> verifies allowlist positive`,
-  async () => {
+for (const [label, file_path] of [
+  ["a build file", "package.json"],
+  ["an svg upload", "public/images/blog/translator-smoke/x.svg"],
+]) {
+  await expect(`POST /commits as the admin to ${label} -> 403 (write roots bind every identity)`, async () => {
     const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
       method: "POST",
-      headers: { authorization: `Bearer ${editorJwt}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
       body: JSON.stringify({
         branch: "main",
-        commit_message: `translator smoke editor ${ts}`,
-        actions: [{ action: "create", file_path: editorPath, content: "---\ntitle: smoke\n---\n" }],
+        commit_message: "smoke negative",
+        actions: [{ action: "create", file_path, content: "blocked" }],
       }),
     });
-    if (r.status === 403) {
-      const text = await r.text();
-      if (/not allowed to push/i.test(text)) {
-        throw new EnvBlockedError(
-          `GitLab refused push (branch protection). Translator forwarded correctly. Resolve at the project: ${text.slice(0, 200)}`,
-        );
-      }
-      throw new Error(`translator returned 403: ${text.slice(0, 300)}`);
+    assertEq(r.status, 403, "status");
+  });
+}
+
+const editorPath = `src/content/blog/.translator-smoke-${ts}.md`;
+await expect(`POST /commits as the editor to allowed path under blog -> verifies allowlist positive`, async () => {
+  const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${editorJwt}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      branch: "main",
+      commit_message: `translator smoke editor ${ts}`,
+      actions: [
+        {
+          action: "create",
+          file_path: editorPath,
+          content: "---\ntitle: smoke\n---\n",
+        },
+      ],
+    }),
+  });
+  if (r.status === 403) {
+    const text = await r.text();
+    if (/not allowed to push/i.test(text)) {
+      throw new EnvBlockedError(
+        `GitLab refused push (branch protection). The translator forwarded correctly. Resolve at the project: ${text.slice(0, 200)}`,
+      );
     }
-    if (r.status !== 201) {
-      const text = await r.text();
-      throw new Error(`expected 201, got ${r.status}: ${text.slice(0, 300)}`);
-    }
-    const j = await r.json();
-    assertEq(j.author_email, EDITOR_EMAIL, "commit.author_email");
-  },
-);
+    throw new Error(`translator returned 403: ${text.slice(0, 300)}`);
+  }
+  if (r.status !== 201) {
+    const text = await r.text();
+    throw new Error(`expected 201, got ${r.status}: ${text.slice(0, 300)}`);
+  }
+  const j = await r.json();
+  assertEq(j.author_email, EDITOR_EMAIL, "commit.author_email");
+});
 
 console.log("");
 console.log("operability");
 
-await expect("service-account PAT expires > 30 days from now", async () => {
+// Group access token expiry early-warning. The token authenticates
+// as itself via /personal_access_tokens/self -- returns the calling
+// token's metadata regardless of role. Falls back BLOCKED if the
+// endpoint shape changes; non-fatal so smoke still validates the
+// rest of the contract.
+await expect(`group access token '${TOKEN_NAME}' expires > 30 days from now`, async () => {
   const r = await req("/gitlab/personal_access_tokens/self", {
     headers: { authorization: `Bearer ${adminJwt}` },
   });
   if (r.status !== 200) {
     throw new EnvBlockedError(
-      `token self-introspection returned ${r.status}; check via GitLab UI -> group/<your-org>/access_tokens`,
+      `token self-introspection returned ${r.status}; check via GitLab UI -> group ${GROUP} access tokens`,
     );
   }
   const me = await r.json();
@@ -400,31 +485,57 @@ await expect("service-account PAT expires > 30 days from now", async () => {
   if (days <= 0) throw new Error(`calling token EXPIRED on ${me.expires_at}`);
   if (days < 30) {
     throw new EnvBlockedError(
-      `calling token expires in ${days} days (${me.expires_at}). Rotate via GitLab UI; update GITLAB_API_TOKEN secret; redeploy.`,
+      `calling token expires in ${days} days (${me.expires_at}). Rotate via GitLab UI; update GITLAB_API_TOKEN CI variable; push to redeploy.`,
     );
   }
   console.log(`           calling token expires in ${days} days (${me.expires_at})`);
 });
 
-await expect("cleanup: delete smoke artifacts via translator (best-effort)", async () => {
+// Cleanup: delete the artifacts this run created so smoke runs leave
+// no trace on the branch. Done via a single multi-action commit
+// as the admin (the editor only has blog scope). We tolerate failure
+// here -- the commits did happen, and a dotfile under src/content/blog
+// that the collection glob skips is not a production problem.
+//
+// The delete list is built by SWEEPING for every .translator-smoke artifact,
+// not just this run's `ts`, so a run that dies between create and
+// cleanup does not orphan its files: the next run sweeps them.
+async function listSmokeArtifacts() {
+  const r = await req(
+    `/gitlab/projects/${REPO_ENC}/repository/tree?path=src%2Fcontent%2Fblog&per_page=100`,
+    { headers: { authorization: `Bearer ${adminJwt}` } },
+  );
+  if (r.status !== 200) return [];
+  const entries = await r.json();
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .filter((e) => e.type === "blob" && (e.name || "").startsWith(".translator-smoke-"))
+    .map((e) => e.path);
+}
+
+await expect("cleanup: sweep all smoke artifacts via the translator (best-effort)", async () => {
+  const found = await listSmokeArtifacts();
+  // Always include this run's two paths even if the tree listing missed
+  // them (eventual consistency right after the create commits).
+  const targets = [...new Set([...found, smokePath, editorPath])];
+  const orphans = targets.filter((p) => !p.includes(ts));
+  if (orphans.length > 0) {
+    console.log(`           sweeping ${orphans.length} orphaned artifact(s) from earlier runs:`);
+    for (const o of orphans) console.log(`             ${o}`);
+  }
   const r = await req(`/gitlab/projects/${REPO_ENC}/repository/commits`, {
     method: "POST",
     headers: { authorization: `Bearer ${adminJwt}`, "content-type": "application/json" },
     body: JSON.stringify({
       branch: "main",
       commit_message: `translator smoke cleanup ${ts}`,
-      actions: [
-        { action: "delete", file_path: adminPath },
-        { action: "delete", file_path: editorPath },
-      ],
+      actions: targets.map((file_path) => ({ action: "delete", file_path })),
     }),
   });
   if (r.status === 403) {
     const text = await r.text();
     if (/not allowed to push/i.test(text)) {
-      throw new EnvBlockedError(
-        "GitLab refused cleanup push (branch protection); artifacts left on main",
-      );
+      throw new EnvBlockedError("GitLab refused cleanup push (branch protection); artifacts left on main");
     }
   }
   if (r.status !== 201) {
@@ -439,7 +550,7 @@ console.log("");
 console.log(`pass=${pass}  blocked=${blocked}  fail=${fail}`);
 if (blocked > 0) {
   console.log("");
-  console.log("blocked (translator worked; environment refused; resolve outside translator):");
+  console.log("blocked (the translator worked; environment refused; resolve outside it):");
   for (const b of blockers) {
     console.log(`  - ${b.name}`);
     console.log(`    ${b.err.message}`);
