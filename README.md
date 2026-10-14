@@ -129,7 +129,9 @@ imports as text, and the `*.yml` module declaration from
 4. **GraphQL.** Sveltia reads through GraphQL and writes through REST.
    `/gitlab/graphql` parses the document and forwards it only when it
    is one of the project read queries Sveltia sends, for a repo the
-   editor has an entry for. Mutations and every other shape are a 403.
+   editor has an entry for. The sign-in permission probe
+   (`userPermissions { pushCode }`) is answered `true` locally for
+   those repos. Mutations and every other shape are a 403.
 5. **Synthesized identity.** `GET /user`, `GET /projects/:id/users`
    and `GET /projects/:id/members/all/0` are answered from the JWT, so
    Sveltia sees the editor, with id 0, as a Maintainer of each repo the
@@ -204,9 +206,11 @@ mid-edit means signing in again.
 - Google Workspace is the only identity provider exercised. The
   `IdPConfig` shape in `src/idp.ts` fits other OIDC providers with a
   hosted-domain claim, but none has been tried.
-- Sveltia 0.179 or later. The access probe added in 0.179
-  (`users?search`) is what the proxy answers; the deployment this was
-  built for runs Sveltia 0.201.
+- Sveltia 0.179 or later. The proxy answers the access probes of
+  0.179 (`users?search`) and 0.224 (`userPermissions { pushCode }`),
+  and is tested against the queries of 0.233.1. Not served: the
+  `root_dir` directory lookups, open authoring and the editorial
+  workflow.
 - In production at one school.
 
 ## Upgrading from 0.1.0

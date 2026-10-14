@@ -24,7 +24,12 @@ and nothing else (no fragments, aliases, directives or literal
 strings). The `fullPath` variable must name a repo the editor has an
 entry for. The forwarded body is the printed AST with the declared
 variables, so GitLab parses exactly what was checked. Everything else
-is a 403 with no upstream call. A Sveltia release that reads a new
+is a 403 with no upstream call. The one exception is Sveltia's
+sign-in probe, `project { userPermissions { pushCode } }` alone: it is
+answered `true` without an upstream call for a repo the editor has an
+entry for, the same way `users` and `members/all/0` are, since the
+service token's own permission says nothing about the editor and
+writes are checked on the commit. A Sveltia release that reads a new
 field is a new entry in the `PROJECT` tree in `src/graphql.ts`.
 
 ## Why `hd` is checked twice

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Works with Sveltia CMS 0.224 and later, which check `userPermissions { pushCode }` over GraphQL before loading the site; the proxy answers it `true` for a repo the editor has an entry for. Tested against the queries of 0.233.1.
+
 ## 0.2.0
 
 ### Security
