@@ -1,6 +1,6 @@
 {
   "name": "sveltia-identity-translator",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Translated-identity proxy for Sveltia CMS: editors authenticate against your existing IdP (Google Workspace, etc) while a single service-account PAT does the GitLab API calls. Editors save changes without ever touching git.",
   "type": "module",
   "license": "MIT",
