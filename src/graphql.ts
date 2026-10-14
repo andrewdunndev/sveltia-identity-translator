@@ -3,7 +3,8 @@
 // Sveltia's GitLab backend reads through GraphQL (default branch,
 // last commit, file tree, blobs) and writes through REST; it has no
 // REST fallback for the reads. Every query it sends is a single
-// anonymous `project(fullPath: $fullPath) { repository { ... } }`.
+// anonymous `project(fullPath: $fullPath) { repository { ... } }`,
+// except the sign-in permission probe, which the proxy answers itself.
 //
 // The body is parsed and accepted only in that shape: one query
 // operation, a single `project` root whose fullPath is a variable
@@ -79,6 +80,12 @@ const PROJECT = node(
   ["fullPath"],
 );
 
+// Sveltia asks whether the signed-in user can push before it loads
+// the site. Answered locally, never forwarded, and only when it is the
+// sole selection: the service token's own permission is not the
+// editor's.
+const PUSH_PROBE = node({ userPermissions: node({ pushCode: leaf }) }, ["fullPath"]);
+
 function fieldAllowed(field: FieldNode, rule: FieldRule): boolean {
   if (field.alias || field.directives?.length) return false;
   const seen = new Set<string>();
@@ -101,7 +108,7 @@ function fieldAllowed(field: FieldNode, rule: FieldRule): boolean {
 /** The operation and its fullPath variable's name; null if the document is not served. */
 function servedQuery(
   doc: DocumentNode,
-): { op: OperationDefinitionNode; fullPathVar: string } | null {
+): { op: OperationDefinitionNode; fullPathVar: string; probe: boolean } | null {
   if (doc.definitions.length !== 1) return null;
   const op = doc.definitions[0];
   if (op.kind !== Kind.OPERATION_DEFINITION || op.operation !== "query") return null;
@@ -116,9 +123,12 @@ function servedQuery(
   if (roots.length !== 1) return null;
   const root = roots[0];
   if (root.kind !== Kind.FIELD || root.name.value !== "project") return null;
-  if (!fieldAllowed(root, PROJECT)) return null;
+  const probe = fieldAllowed(root, PUSH_PROBE);
+  if (!probe && !fieldAllowed(root, PROJECT)) return null;
   const fullPath = root.arguments?.find((a) => a.name.value === "fullPath")?.value;
-  return fullPath?.kind === Kind.VARIABLE ? { op, fullPathVar: fullPath.name.value } : null;
+  return fullPath?.kind === Kind.VARIABLE
+    ? { op, fullPathVar: fullPath.name.value, probe }
+    : null;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -195,7 +205,7 @@ export async function handleGraphql(
     );
   }
 
-  const { op, fullPathVar } = served;
+  const { op, fullPathVar, probe } = served;
   const variables: Record<string, unknown> = Object.create(null);
   for (const v of op.variableDefinitions ?? []) {
     const name = v.variable.name.value;
@@ -222,6 +232,10 @@ export async function handleGraphql(
       { error: "forbidden", detail: `read access denied to ${fullPath} for ${session.email}` },
       403,
     );
+  }
+
+  if (probe) {
+    return jsonResponse({ data: { project: { userPermissions: { pushCode: true } } } }, 200);
   }
 
   let forwarded: string;

@@ -747,6 +747,34 @@ const SVELTIA_QUERIES = {
     }
   }
 `,
+  blobIds: `
+  query($fullPath: ID!, $branch: String!, $paths: [String!]!) {
+    project(fullPath: $fullPath) {
+      repository {
+        blobs(ref: $branch, paths: $paths) {
+          nodes {
+            path
+            oid
+          }
+        }
+      }
+    }
+  }
+`,
+  blobTexts: `
+  query($fullPath: ID!, $branch: String!, $paths: [String!]!) {
+    project(fullPath: $fullPath) {
+      repository {
+        blobs(ref: $branch, paths: $paths) {
+          nodes {
+            path
+            rawTextBlob
+          }
+        }
+      }
+    }
+  }
+`,
   mergeRequestBlobs: `
   query($fullPath: ID!, $branch: String!, $paths: [String!]!) {
     project(fullPath: $fullPath) {
@@ -764,6 +792,16 @@ const SVELTIA_QUERIES = {
   }
 `,
 };
+
+const PUSH_PROBE = `
+  query($fullPath: ID!) {
+    project(fullPath: $fullPath) {
+      userPermissions {
+        pushCode
+      }
+    }
+  }
+`;
 
 const sveltiaVariables = (fullPath) => ({
   fullPath,
@@ -848,6 +886,58 @@ describe("graphql", () => {
       const query = doc.replace(/\n\s*/g, " ");
       assert.equal((await gql(jwt, query, sveltiaVariables("example-org/translator"))).status, 403);
       assert.equal((await gql(stranger, query, sveltiaVariables("example-org/website"))).status, 403);
+    }
+    assert.equal(upstream.length, 0);
+  });
+
+  test("the push probe is answered locally for an allowlisted repo", async () => {
+    const jwt = await mintJwt("editor@example.org", "Smoke Teacher");
+    const query = PUSH_PROBE.replace(/\n\s*/g, " ");
+    const r = await gql(jwt, query, { fullPath: "example-org/website" });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { data: { project: { userPermissions: { pushCode: true } } } });
+    assert.equal(upstream.length, 0);
+  });
+
+  test("the push probe is denied without a session, for an unlisted repo, and for a stranger", async () => {
+    const jwt = await mintJwt("editor@example.org", "Smoke Teacher");
+    const stranger = await mintJwt("stranger@example.org", "Nobody");
+    const query = PUSH_PROBE.replace(/\n\s*/g, " ");
+    const anon = await call("/gitlab/graphql", {
+      method: "POST",
+      body: { query, variables: { fullPath: "example-org/website" } },
+    });
+    assert.equal(anon.status, 401);
+    assert.equal((await gql(jwt, query, { fullPath: "example-org/translator" })).status, 403);
+    assert.equal((await gql(stranger, query, { fullPath: "example-org/website" })).status, 403);
+    assert.equal((await gql(jwt, query, {})).status, 400);
+    assert.equal(upstream.length, 0);
+  });
+
+  test("the push probe combined with other fields, or with extra permissions, is 403", async () => {
+    const jwt = await mintJwt("root@example.org", "Root");
+    for (const sel of [
+      "userPermissions { pushCode } repository { rootRef }",
+      "userPermissions { pushCode adminProject }",
+      "userPermissions { pushCode } group { id }",
+      "p: userPermissions { pushCode }",
+    ]) {
+      const query = `query($fullPath: ID!) { project(fullPath: $fullPath) { ${sel} } }`;
+      assert.equal((await gql(jwt, query, { fullPath: "example-org/website" })).status, 403, sel);
+    }
+    assert.equal(upstream.length, 0);
+  });
+
+  test("the directory-listing and merge request queries stay denied", async () => {
+    const jwt = await mintJwt("root@example.org", "Root");
+    const denied = [
+      "query($fullPath: ID!, $ref: String!, $path: String!, $cursor: String!) { project(fullPath: $fullPath) { repository { tree(ref: $ref, path: $path) { trees(after: $cursor) { nodes { name sha } pageInfo { endCursor hasNextPage } } } } } }",
+      "query($fullPath: ID!, $branch: String!, $cursor: String!, $path: String!) { project(fullPath: $fullPath) { repository { tree(ref: $branch, path: $path, recursive: true) { blobs(after: $cursor) { nodes { type path sha } pageInfo { endCursor hasNextPage } } } } } }",
+      "query($fullPath: ID!, $iids: [String!]) { project(fullPath: $fullPath) { mergeRequests(iids: $iids, first: 100) { nodes { iid userPermissions { canMerge } } } } }",
+    ];
+    for (const query of denied) {
+      const r = await gql(jwt, query, { fullPath: "example-org/website" });
+      assert.equal(r.status, 403, query);
     }
     assert.equal(upstream.length, 0);
   });
