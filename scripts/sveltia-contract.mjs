@@ -10,9 +10,10 @@
 //         CONTRACT_EXCLUSIONS (src/contract.ts).
 // Exit 1: a call is denied, or loses a query parameter the route does
 //         not forward; each is listed with its key and at= reason.
-// Exit 2: no chunk, or a chunk with no GraphQL documents or no REST
-//         paths: Sveltia moved its GitLab backend, and a check that
-//         finds nothing must not pass.
+// Exit 2: no chunk, or fewer than MIN_DOCS GraphQL documents or
+//         MIN_PATHS REST paths: Sveltia moved its GitLab backend or
+//         the extraction was partial, and a check that finds little
+//         must not pass. The floors are a tripwire, not a spec.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { argv, exit, stdout } from "node:process";
@@ -49,8 +50,10 @@ try {
 } catch (err) {
   broken(`${CHUNK}: ${err.message}`);
 }
-if (docs.length === 0) broken(`${CHUNK}: no GraphQL documents found`);
-if (paths.length === 0) broken(`${CHUNK}: no REST paths found`);
+const MIN_DOCS = 5;
+const MIN_PATHS = 5;
+if (docs.length < MIN_DOCS) broken(`${CHUNK}: ${docs.length} GraphQL documents found, expected at least ${MIN_DOCS}; partial extraction`);
+if (paths.length < MIN_PATHS) broken(`${CHUNK}: ${paths.length} REST paths found, expected at least ${MIN_PATHS}; partial extraction`);
 
 const REPO = "contract/site";
 const EMAIL = "editor@contract.test";
@@ -175,6 +178,11 @@ for (const v of ["denied", "excluded", "ok"]) {
     const tail = v === "ok" ? (r.why ? `  (${r.why})` : "") : `  [${r.key}] ${r.why}`;
     say(`${v.padEnd(8)} ${r.label}${tail}`);
   }
+}
+const unchecked = results.filter((r) => r.why?.startsWith("unchecked query"));
+if (unchecked.length) {
+  say(`sveltia-contract: ${unchecked.length} paths with query params the checker could not resolve (served, params unverified):`);
+  for (const r of unchecked) say(`  ${r.label}  ${r.why}`);
 }
 const count = (v) => results.filter((r) => r.verdict === v).length;
 say(`sveltia-contract: ${count("ok")} ok, ${count("excluded")} excluded, ${count("denied")} denied`);

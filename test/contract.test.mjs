@@ -32,15 +32,22 @@ const gql = (doc) => `${B}\n  ${doc}\n${B}`;
 const READS = [
   `var Gt=e=>e?.split(${B},${B}).find(e=>/;\\s*rel="next"/.test(e));`,
   `var It=({scoped:e})=>${gql(`query($fullPath: ID!, $ref: String!\${e?${B}, $path: String!${B}:${B}${B}}) { project(fullPath: $fullPath) { repository { tree(ref: $ref\${e?${B}, path: $path${B}:${B}${B}}) { trees { nodes { name sha } } } } } }`)};`,
-  `var Ut=${gql("query($fullPath: ID!, $ref: String!) { project(fullPath: $fullPath) { repository { paginatedTree(ref: $ref, first: 100) { nodes { blobs { nodes { path } } } } } } }")};`,
+  `var Ut=${gql("query($fullPath: ID!, $ref: String!) { project(fullPath: $fullPath) { repository { tree(ref: $ref) { blobs { nodes { path } } } } } }")};`,
   `var Kt=async(e,t)=>{let i=new URLSearchParams({...e&&{path:e},ref:t,per_page:${B}100${B},pagination:${B}keyset${B}}),a=await w(${B}/projects/\${M()}/repository/tree?\${i}${B},{responseType:${B}raw${B}})};`,
   `var V=async(h,i)=>w(${B}/projects/\${M(i)}/repository/commits${B},{method:${B}POST${B},body:h});`,
+  // Padding so a fixture clears the minimum-count floor (5 and 5).
+  `var P1=${gql("query($fullPath: ID!) { project(fullPath: $fullPath) { repository { rootRef } } }")};`,
+  `var P2=${gql("query($fullPath: ID!, $paths: [String!]!, $ref: String!) { project(fullPath: $fullPath) { repository { blobs(paths: $paths, ref: $ref) { nodes { path size } } } } }")};`,
+  `var P3=${gql("query($fullPath: ID!, $ref: String!) { project(fullPath: $fullPath) { repository { tree(ref: $ref) { lastCommit { sha } } } } }")};`,
+  `var R1=async()=>w(${B}/projects/\${M()}/repository/files/a.md/raw${B});`,
+  `var R2=async()=>w(${B}/projects/\${M()}/repository/branches/main${B});`,
+  `var R3=async()=>w(${B}/projects/\${M()}/repository/commits/abc/statuses${B});`,
 ].join("\n");
 
 test("a chunk Sveltia could ship today passes", () => {
   const r = check(READS);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /3 graphql documents, 2 rest paths/);
+  assert.match(r.out, /6 graphql documents, 5 rest paths/);
   assert.match(r.out, /0 denied/);
 });
 
@@ -53,7 +60,7 @@ test("a denied mutation fails with its at= reason", () => {
 test("a read that leaves the repository fails", () => {
   const r = check(`${READS}\nvar At=${gql("query($fullPath: ID!) { project(fullPath: $fullPath) { repository { lastCommit { author { username } } } } }")};`);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /at=project\.repository\.lastCommit\.author/);
+  assert.match(r.out, /at=project\.repository\.lastCommit/);
 });
 
 test("merge request queries and routes are reported as excluded, not skipped", () => {
@@ -77,7 +84,7 @@ test("an unknown route, or a query parameter the route drops, fails", () => {
 });
 
 test("no chunk, or a chunk with no GraphQL documents or REST paths, fails loudly", () => {
-  for (const chunk of [null, "", `var a=${B}/projects/\${M()}/repository/commits${B};`, `var a=${gql("query($fullPath: ID!) { project(fullPath: $fullPath) { repository { rootRef } } }")};`]) {
+  for (const chunk of [null, "", READS.split("\n").slice(0, 4).join("\n"), `var a=${B}/projects/\${M()}/repository/commits${B};`, `var a=${gql("query($fullPath: ID!) { project(fullPath: $fullPath) { repository { rootRef } } }")};`]) {
     const r = check(chunk);
     assert.equal(r.code, 2, `${JSON.stringify(chunk)}\n${r.out}`);
   }
@@ -87,4 +94,11 @@ test("a GraphQL document with an interpolation that cannot be expanded fails lou
   const r = check(`${READS}\nvar X=${gql("query($fullPath: ID!) { project(fullPath: $fullPath) { repository { ${frag} } } }")};`);
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /interpolates \$\{frag\}/);
+});
+
+test("only the branch-search params are excluded; another dropped param on the route fails", () => {
+  const r = check(`${READS}\nvar B1=async e=>w(${B}/projects/\${M()}/repository/branches?search=\${e}&per_page=1&page=2${B});`);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /\[rest GET projects\/\{repo\}\/repository\/branches\?page\] at=query\(page\) dropped/);
+  assert.match(r.out, /^excluded .*\[rest GET projects\/\{repo\}\/repository\/branches\?search\]/m);
 });

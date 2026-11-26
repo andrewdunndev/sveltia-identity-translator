@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `sveltia-contract <dir>` (`npx sveltia-contract node_modules/@sveltia/cms`) reads an installed Sveltia's GitLab backend chunk as text and runs every GraphQL document and REST path it can send through the Worker, under the rules as they are. It exits 1 on a denied call or a dropped query parameter, naming each with its `at=` reason, reports the accepted denials in `src/contract.ts` (editorial workflow, open authoring, manual deploy trigger) as excluded, lists paths whose query parameters it could not resolve, and exits 2 when the chunk is missing or yields fewer than 5 GraphQL documents or 5 REST paths (a tripwire for partial extraction).
+
 ## 0.2.2
 
 ### Fixed

@@ -28,7 +28,10 @@ export const CONTRACT_EXCLUSIONS: readonly Exclusion[] = [
   { key: "rest * {}/approv*", why: "editorial workflow: merge request approval" },
   { key: "rest * {}/unapprove", why: "editorial workflow: merge request approval" },
   { key: "rest GET projects/{repo}/repository/compare", why: "editorial workflow: entry branch diff" },
-  { key: "rest GET projects/{repo}/repository/branches?*", why: "editorial workflow: entry branch search" },
+  // Only the two params Sveltia's entry-branch search sends; a param
+  // dropped anywhere else on this route still fails.
+  { key: "rest GET projects/{repo}/repository/branches?search", why: "editorial workflow: entry branch search" },
+  { key: "rest GET projects/{repo}/repository/branches?per_page", why: "editorial workflow: entry branch search" },
 
   // Open authoring: contributors without push access work in forks.
   // Every editor here pushes as the service account instead.

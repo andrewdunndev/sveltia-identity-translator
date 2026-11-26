@@ -209,7 +209,11 @@ mid-edit means signing in again.
 - Sveltia 0.179 or later. The proxy answers the access probes of
   0.179 (`users?search`) and 0.224 (`userPermissions { pushCode }`),
   and is tested against the GitLab queries of 0.262.0 and 0.273.1.
-  Not served: open authoring and the editorial workflow.
+  `npx sveltia-contract node_modules/@sveltia/cms` checks the
+  installed release: it fails on any GraphQL query or REST call that
+  release can send and the proxy would refuse. Not served, and listed
+  as excluded in `src/contract.ts`: open authoring and the editorial
+  workflow.
 - In production at one school.
 
 ## Upgrading from 0.1.0
