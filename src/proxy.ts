@@ -36,6 +36,7 @@ export interface ProxyEnv {
 const CORS_HEADERS = {
   "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type",
+  "access-control-expose-headers": "link",
 };
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -129,7 +130,8 @@ const ACCOUNT_ROUTES = new Map<string, RouteSpec>([
 ]);
 
 // Matched against the raw path after projects/<repo>/. The membership
-// probe, the branch list and the tree are for the smoke only.
+// probe and the branch list are for the smoke only. Sveltia 0.27x lists
+// files through the tree, a directory at a time with keyset pages.
 const PROJECT_GET_ROUTES: Array<[RegExp, RouteSpec]> = [
   [/^users$/, { kind: "users", query: [] }],
   [/^members\/all\/0$/, { kind: "members", query: [] }],
@@ -137,7 +139,10 @@ const PROJECT_GET_ROUTES: Array<[RegExp, RouteSpec]> = [
   [/^repository\/commits$/, { kind: "read", query: ["ref_name", "path", "per_page"] }],
   [/^repository\/commits\/[^/]+\/statuses$/, { kind: "read", query: ["per_page"] }],
   [/^repository\/branches(\/[^/]+)?$/, { kind: "read", query: [] }],
-  [/^repository\/tree$/, { kind: "read", query: ["path", "per_page", "recursive"] }],
+  [
+    /^repository\/tree$/,
+    { kind: "read", query: ["path", "ref", "recursive", "per_page", "pagination", "page_token", "page"] },
+  ],
   [/^deployments$/, { kind: "read", query: ["order_by", "sort", "per_page", "updated_after"] }],
 ];
 
@@ -418,7 +423,9 @@ export async function handleGitlabProxy(
 
   const respBody = await upstream.arrayBuffer();
   const respHeaders = new Headers(CORS_HEADERS);
-  const respCt = upstream.headers.get("content-type");
-  if (respCt) respHeaders.set("content-type", respCt);
+  for (const h of ["content-type", "link"]) {
+    const v = upstream.headers.get(h);
+    if (v) respHeaders.set(h, v);
+  }
   return new Response(respBody, { status: upstream.status, headers: respHeaders });
 }

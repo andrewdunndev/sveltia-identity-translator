@@ -68,8 +68,15 @@ const PROJECT = node(
             },
             ["after"],
           ),
+          trees: node(
+            {
+              nodes: node({ name: leaf, sha: leaf }),
+              pageInfo: node({ endCursor: leaf, hasNextPage: leaf }),
+            },
+            ["after"],
+          ),
         },
-        ["ref", "recursive"],
+        ["ref", "path", "recursive"],
       ),
       blobs: node(
         { nodes: node({ path: leaf, oid: leaf, size: leaf, rawTextBlob: leaf }) },
@@ -86,49 +93,64 @@ const PROJECT = node(
 // editor's.
 const PUSH_PROBE = node({ userPermissions: node({ pushCode: leaf }) }, ["fullPath"]);
 
-function fieldAllowed(field: FieldNode, rule: FieldRule): boolean {
-  if (field.alias || field.directives?.length) return false;
+/**
+ * Null when the field fits the rule, else where it first does not, as
+ * field and argument names only: safe to log, never a value.
+ */
+function misfit(field: FieldNode, rule: FieldRule, at = ""): string | null {
+  const here = at ? `${at}.${field.name.value}` : field.name.value;
+  if (field.alias) return `${here}:alias`;
+  if (field.directives?.length) return `${here}@directive`;
   const seen = new Set<string>();
   for (const arg of field.arguments ?? []) {
-    if (seen.has(arg.name.value)) return false;
-    seen.add(arg.name.value);
-    if (!rule.args.includes(arg.name.value)) return false;
-    if (arg.value.kind !== Kind.VARIABLE && arg.value.kind !== Kind.BOOLEAN) return false;
+    const a = arg.name.value;
+    if (seen.has(a) || !rule.args.includes(a)) return `${here}(${a})`;
+    seen.add(a);
+    if (arg.value.kind !== Kind.VARIABLE && arg.value.kind !== Kind.BOOLEAN) {
+      return `${here}(${a}:literal)`;
+    }
   }
   const children = rule.fields;
-  if (!children) return !field.selectionSet;
-  if (!field.selectionSet) return false;
-  return field.selectionSet.selections.every((s) => {
-    if (s.kind !== Kind.FIELD) return false;
+  if (!children) return field.selectionSet ? `${here}{}` : null;
+  if (!field.selectionSet) return `${here}:selection`;
+  for (const s of field.selectionSet.selections) {
+    if (s.kind !== Kind.FIELD) return `${here}{...}`;
     const child = children.get(s.name.value);
-    return child !== undefined && fieldAllowed(s, child);
-  });
+    const m = child ? misfit(s, child, here) : `${here}.${s.name.value}`;
+    if (m) return m;
+  }
+  return null;
 }
 
-/** The operation and its fullPath variable's name; null if the document is not served. */
-function servedQuery(
-  doc: DocumentNode,
-): { op: OperationDefinitionNode; fullPathVar: string; probe: boolean } | null {
-  if (doc.definitions.length !== 1) return null;
+type Served =
+  | { op: OperationDefinitionNode; fullPathVar: string; probe: boolean }
+  | { denied: string };
+
+/** The operation and its fullPath variable's name, or why the document is not served. */
+function servedQuery(doc: DocumentNode): Served {
+  if (doc.definitions.length !== 1) return { denied: "definitions" };
   const op = doc.definitions[0];
-  if (op.kind !== Kind.OPERATION_DEFINITION || op.operation !== "query") return null;
-  if (op.directives?.length) return null;
+  if (op.kind !== Kind.OPERATION_DEFINITION) return { denied: "definitions" };
+  if (op.operation !== "query") return { denied: op.operation };
+  if (op.directives?.length) return { denied: "query@directive" };
   const declared = new Set<string>();
   for (const v of op.variableDefinitions ?? []) {
-    if (v.defaultValue || v.directives?.length) return null;
-    if (declared.has(v.variable.name.value)) return null;
+    if (v.defaultValue || v.directives?.length) return { denied: "variables" };
+    if (declared.has(v.variable.name.value)) return { denied: "variables" };
     declared.add(v.variable.name.value);
   }
   const roots = op.selectionSet.selections;
-  if (roots.length !== 1) return null;
+  if (roots.length !== 1) return { denied: "roots" };
   const root = roots[0];
-  if (root.kind !== Kind.FIELD || root.name.value !== "project") return null;
-  const probe = fieldAllowed(root, PUSH_PROBE);
-  if (!probe && !fieldAllowed(root, PROJECT)) return null;
+  if (root.kind !== Kind.FIELD) return { denied: "roots" };
+  if (root.name.value !== "project") return { denied: root.name.value };
+  const probe = misfit(root, PUSH_PROBE) === null;
+  const wrong = probe ? null : misfit(root, PROJECT);
+  if (wrong) return { denied: wrong };
   const fullPath = root.arguments?.find((a) => a.name.value === "fullPath")?.value;
   return fullPath?.kind === Kind.VARIABLE
     ? { op, fullPathVar: fullPath.name.value, probe }
-    : null;
+    : { denied: "project:fullPath" };
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -194,8 +216,8 @@ export async function handleGraphql(
   }
 
   const served = servedQuery(doc);
-  if (!served) {
-    console.log(`${name}.deny.graphql_query email=${session.email}`);
+  if ("denied" in served) {
+    console.log(`${name}.deny.graphql_query email=${session.email} at=${served.denied}`);
     return jsonResponse(
       {
         error: "forbidden",

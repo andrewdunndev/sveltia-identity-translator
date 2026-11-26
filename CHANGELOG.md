@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Sveltia CMS 0.262 and later failed to load the site with "forbidden": the per-folder file-list (`tree(path:) { blobs }`, 0.262) and directory-SHA (`tree(path:) { trees }`, 0.27x) queries were refused. Both are now served for a repo the editor has an entry for. Tested against the queries of 0.262.0 and 0.273.1.
+- `repository/tree` dropped `ref`, `pagination`, `page_token` and `page`, and the `Link` header was not passed back, so Sveltia 0.27x listed folders on the default branch only and saw at most their first 100 entries.
+
+### Changed
+
+- `deny.graphql_query` log lines name where the query left the allowlist (`at=project.mergeRequests`, `at=mutation`); never variables.
+
 ## 0.2.1
 
 ### Changed

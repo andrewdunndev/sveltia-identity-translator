@@ -671,6 +671,31 @@ describe("query strings and account routes", () => {
     );
   });
 
+  test("the tree keeps Sveltia's keyset paging and hands back the Link header", async () => {
+    const jwt = await mintJwt("editor@example.org", "Smoke Teacher");
+    const link = `<https://gitlab.com/api/v4/projects/1/repository/tree?page_token=abc&pagination=keyset&per_page=100&ref=main>; rel="next"`;
+    globalThis.fetch = async (url, init) => {
+      upstream.push({ url: String(url), init });
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json", link } });
+    };
+    const q = "path=src%2Fcontent&ref=main&per_page=100&pagination=keyset&page_token=abc&page=2&recursive=false&sudo=1";
+    const r = await call(`/gitlab/projects/${REPO}/repository/tree?${q}`, { jwt });
+    assert.equal(r.status, 200);
+    assert.equal(
+      upstream[0].url,
+      `https://gitlab.com/api/v4/projects/${REPO}/repository/tree?${q.replace("&sudo=1", "")}`,
+    );
+    assert.equal(r.headers.get("link"), link);
+    assert.match(r.headers.get("access-control-expose-headers") ?? "", /\blink\b/);
+
+    const stranger = await mintJwt("stranger@example.org", "Nobody");
+    const denied = await call(`/gitlab/projects/${REPO}/repository/tree?${q}`, { jwt: stranger });
+    assert.equal(denied.status, 403);
+    const other = encodeURIComponent("example-org/translator");
+    assert.equal((await call(`/gitlab/projects/${other}/repository/tree?${q}`, { jwt })).status, 403);
+    assert.equal(upstream.length, 1);
+  });
+
   test("/avatar and /personal_access_tokens/self need an editors.yml identity", async () => {
     const stranger = await mintJwt("stranger@example.org", "Nobody");
     for (const p of ["/gitlab/avatar?email=a%40b.c&size=48", "/gitlab/personal_access_tokens/self"]) {
@@ -686,9 +711,9 @@ describe("query strings and account routes", () => {
   });
 });
 
-// Copied from @sveltia/cms (dist/sveltia-cms.js, GitLab backend) at the
-// version website pins. Sveltia collapses whitespace and fills
-// $fullPath and $branch before sending.
+// Copied from @sveltia/cms (dist/chunks/gitlab.js) at 0.262.0 and
+// 0.273.1. Sveltia collapses whitespace and fills $fullPath and
+// $branch before sending.
 const SVELTIA_QUERIES = {
   rootRef: `
   query($fullPath: ID!) {
@@ -722,6 +747,49 @@ const SVELTIA_QUERIES = {
             nodes {
               type
               path
+              sha
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+          }
+        }
+      }
+    }
+  }
+`,
+  // 0.262: one per collection and media folder at load.
+  scopedFileList: `
+  query($fullPath: ID!, $branch: String!, $cursor: String!, $path: String!) {
+    project(fullPath: $fullPath) {
+      repository {
+        tree(ref: $branch, path: $path, recursive: true) {
+          blobs(after: $cursor) {
+            nodes {
+              type
+              path
+              sha
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+          }
+        }
+      }
+    }
+  }
+`,
+  // 0.27x: one per collection and media folder at load; 0.262 with root_dir.
+  dirSha: `
+  query($fullPath: ID!, $ref: String!, $path: String!, $cursor: String!) {
+    project(fullPath: $fullPath) {
+      repository {
+        tree(ref: $ref, path: $path) {
+          trees(after: $cursor) {
+            nodes {
+              name
               sha
             }
             pageInfo {
@@ -806,6 +874,8 @@ const PUSH_PROBE = `
 const sveltiaVariables = (fullPath) => ({
   fullPath,
   branch: "main",
+  ref: "main",
+  path: "src/content",
   cursor: "",
   paths: ["src/content/blog/a.md"],
 });
@@ -928,17 +998,55 @@ describe("graphql", () => {
     assert.equal(upstream.length, 0);
   });
 
-  test("the directory-listing and merge request queries stay denied", async () => {
+  test("the per-directory load queries are forwarded for the repo and denied for another project", async () => {
+    const jwt = await mintJwt("editor@example.org", "Smoke Teacher");
+    for (const name of ["scopedFileList", "dirSha"]) {
+      const query = SVELTIA_QUERIES[name].replace(/\n\s*/g, " ");
+      const own = await gql(jwt, query, sveltiaVariables("example-org/website"));
+      assert.equal(own.status, 200, name);
+      const other = await gql(jwt, query, sveltiaVariables("example-org/translator"));
+      assert.equal(other.status, 403, name);
+    }
+    assert.equal(upstream.length, 2);
+  });
+
+  test("the merge request queries stay denied", async () => {
     const jwt = await mintJwt("root@example.org", "Root");
     const denied = [
-      "query($fullPath: ID!, $ref: String!, $path: String!, $cursor: String!) { project(fullPath: $fullPath) { repository { tree(ref: $ref, path: $path) { trees(after: $cursor) { nodes { name sha } pageInfo { endCursor hasNextPage } } } } } }",
-      "query($fullPath: ID!, $branch: String!, $cursor: String!, $path: String!) { project(fullPath: $fullPath) { repository { tree(ref: $branch, path: $path, recursive: true) { blobs(after: $cursor) { nodes { type path sha } pageInfo { endCursor hasNextPage } } } } } }",
       "query($fullPath: ID!, $iids: [String!]) { project(fullPath: $fullPath) { mergeRequests(iids: $iids, first: 100) { nodes { iid userPermissions { canMerge } } } } }",
+      "query($fullPath: ID!, $iids: [String!]) { project(fullPath: $fullPath) { mergeRequests(iids: $iids, first: 100) { nodes { iid allowCollaboration sourceProject { fullPath } } } } }",
     ];
     for (const query of denied) {
       const r = await gql(jwt, query, { fullPath: "example-org/website" });
       assert.equal(r.status, 403, query);
     }
+    assert.equal(upstream.length, 0);
+  });
+
+  test("a denied query is logged with where it left the allowlist, never its variables", async () => {
+    const jwt = await mintJwt("root@example.org", "Root");
+    const cases = [
+      ["query($fullPath: ID!, $iids: [String!]) { project(fullPath: $fullPath) { mergeRequests(iids: $iids) { nodes { iid } } } }", "project.mergeRequests"],
+      ["query($fullPath: ID!, $b: String!) { project(fullPath: $fullPath) { repository { tree(ref: $b, first: $b) { lastCommit { sha } } } } }", "project.repository.tree(first)"],
+      [`query($fullPath: ID!) { project(fullPath: $fullPath) { repository { blobs(ref: "main", paths: $fullPath) { nodes { path } } } } }`, "project.repository.blobs(ref:literal)"],
+      ["mutation { commitCreate(input: {}) { errors } }", "mutation"],
+      ["{ __schema { types { name } } }", "__schema"],
+    ];
+    const logged = [];
+    const quiet = console.log;
+    console.log = (line) => logged.push(line);
+    try {
+      for (const [query] of cases) {
+        const r = await gql(jwt, query, { fullPath: "example-org/website", b: "secret-value" });
+        assert.equal(r.status, 403, query);
+      }
+    } finally {
+      console.log = quiet;
+    }
+    assert.deepEqual(
+      logged,
+      cases.map(([, at]) => `translator.deny.graphql_query email=root@example.org at=${at}`),
+    );
     assert.equal(upstream.length, 0);
   });
 
@@ -976,7 +1084,8 @@ describe("graphql", () => {
       `subscription($fullPath: ID!) { project(fullPath: $fullPath) { ${RR} } }`,
       `query($fullPath: ID!) @live { project(fullPath: $fullPath) { ${RR} } }`,
       `query($fullPath: ID!) { group(fullPath: $fullPath) { ${RR} } }`,
-      `query($fullPath: ID!) { project(fullPath: $fullPath) { repository { tree(ref: $fullPath, path: $fullPath) { lastCommit { sha } } } } }`,
+      `query($fullPath: ID!) { project(fullPath: $fullPath) { repository { tree(ref: $fullPath, pathPrefix: $fullPath) { lastCommit { sha } } } } }`,
+      `query($fullPath: ID!) { project(fullPath: $fullPath) { repository { tree(ref: $fullPath) { trees(after: $fullPath) { nodes { name sha path } } } } } }`,
       `query($fullPath: ID!) { project(fullPath: $fullPath) { repository { rootRef { sha } } } }`,
       `query($fullPath: ID!) { project(fullPath: $fullPath) { repository } }`,
       `query($fullPath: ID!) { project(fullPath: true) { ${RR} } }`,
