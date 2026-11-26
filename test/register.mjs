@@ -1,3 +1,3 @@
-import { register } from "node:module";
+import { install } from "../scripts/loader.mjs";
 
-register("./loader.mjs", import.meta.url);
+install();

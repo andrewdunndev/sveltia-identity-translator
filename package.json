@@ -21,6 +21,9 @@
   "exports": {
     ".": "./src/worker.ts"
   },
+  "bin": {
+    "sveltia-contract": "scripts/sveltia-contract.mjs"
+  },
   "files": [
     "src",
     "scripts",
@@ -36,7 +39,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import ./test/register.mjs --test \"test/*.test.mjs\"",
     "lint:editors": "node scripts/lint-editors.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "contract": "node scripts/sveltia-contract.mjs"
   },
   "dependencies": {
     "graphql": "17.0.2",
