@@ -217,7 +217,7 @@ export async function handleGraphql(
 
   const served = servedQuery(doc);
   if ("denied" in served) {
-    console.log(`${name}.deny.graphql_query email=${session.email} at=${served.denied}`);
+    console.log(`${name}.deny.graphql_query email=${session.email} at=${served.denied.slice(0, 200)}`);
     return jsonResponse(
       {
         error: "forbidden",
